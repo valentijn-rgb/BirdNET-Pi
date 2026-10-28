@@ -42,10 +42,13 @@ const V2_SQL = [
         . ' GROUP BY substr(Time,1,2)',
     'last_row' => 'SELECT Date, Time, Com_Name, Confidence, File_Name FROM detections WHERE Sci_Name = :s ORDER BY Date DESC, Time DESC LIMIT 1',
     'first_seen' => "SELECT Date||' '||Time AS first FROM detections WHERE Sci_Name = :s ORDER BY Date, Time LIMIT 1",
-    'last_seen' => "SELECT Date||' '||Time AS last FROM detections WHERE Sci_Name = :s ORDER BY Date DESC, Time DESC LIMIT 1",
-    // Counts only: MIN/MAX(Date||' '||Time) here would build two strings per row (3× slower);
-    // first/last come from first_seen/last_seen, one index probe each per species.
-    'species_all' => 'SELECT Sci_Name, COUNT(*) AS n FROM detections WHERE +rowid <= :m GROUP BY Sci_Name',
+    // Counts per species, then first/last by one index probe each (correlated subqueries, in one
+    // statement): MIN/MAX(Date||' '||Time) over the group would build two strings per row (4× slower),
+    // and 200 probes from PHP cost more than the whole statement.
+    'species_all' => "SELECT c.Sci_Name, c.n,
+          (SELECT Date||' '||Time FROM detections f WHERE f.Sci_Name = c.Sci_Name ORDER BY Date, Time LIMIT 1) AS first,
+          (SELECT Date||' '||Time FROM detections l WHERE l.Sci_Name = c.Sci_Name ORDER BY Date DESC, Time DESC LIMIT 1) AS last
+        FROM (SELECT Sci_Name, COUNT(*) AS n FROM detections WHERE +rowid <= :m GROUP BY Sci_Name) AS c",
     'species_d30' => 'SELECT Sci_Name, Date, COUNT(*) AS n FROM detections WHERE Date >= :from AND +rowid <= :m GROUP BY +Sci_Name, Date',
     'species_since' => 'SELECT Sci_Name, Date, COUNT(*) AS n, MIN(Time) AS tmin, MAX(Time) AS tmax
         FROM detections WHERE rowid > :after AND rowid <= :m GROUP BY +Sci_Name, Date',
@@ -605,15 +608,13 @@ function v2_species_build(int $max): array
             $d30[$r['Sci_Name']][$r['Date']] = (int) $r['n'];
         }
     }
-    $firstSeen = v2_stmt('first_seen');
-    $lastSeen = v2_stmt('last_seen');
     $out = [];
     foreach (v2_q('species_all', [':m' => $max]) as $r) {
         $sci = $r['Sci_Name'];
-        $first = $firstSeen([':s' => $sci])[0]['first'] ?? null;
-        $last = $lastSeen([':s' => $sci])[0]['last'] ?? null;
+        $first = $r['first'];
+        $last = $r['last'];
         if ($first === null || $last === null) {
-            continue; // deleted since the count
+            continue; // cannot happen within one statement; never cache a null first/last
         }
         $out[$sci] = [
             'sci' => $sci,
