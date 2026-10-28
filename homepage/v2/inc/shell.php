@@ -141,7 +141,7 @@ function v2_guard(callable $body): void
         if (!headers_sent()) {
             header('Retry-After: 2');
         }
-        v2_error_page(503, 'Database bezig', 'De database wordt net bijgewerkt door de analyse. Probeer het over een paar seconden opnieuw.');
+        v2_error_page(503, 'Database bezig', 'De analyse schrijft net. Probeer het over een paar seconden opnieuw.');
     } catch (Throwable $e) {
         error_log('v2: ' . get_class($e) . ': ' . $e->getMessage() . ' at ' . $e->getFile() . ':' . $e->getLine());
         v2_error_page(500, 'Er ging iets mis', 'Deze pagina kon niet worden geladen. De fout staat in het log van de webserver.');

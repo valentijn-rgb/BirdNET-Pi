@@ -98,8 +98,9 @@ main { flex: 1; width: 100%; max-width: 960px; margin: 0 auto; padding: 20px 16p
 
 /* Charts */
 .bars { display: block; width: 100%; }
-.bars .on { fill: var(--bar); }
-.bars .off { fill: var(--bar-empty); }
+.bars { height: 40px; }
+.bars .bar { fill: var(--bar); }
+.bars .bar-empty { fill: var(--bar-empty); }
 .axis { display: flex; justify-content: space-between; font-size: var(--f13); color: var(--muted); }
 .spectro { overflow-x: auto; border-radius: 12px; background: #000; }
 .spectro img { height: 200px; width: auto; max-width: none; display: block; }
@@ -138,3 +139,41 @@ table.species th:first-child, table.species td:first-child { padding-left: 18px;
 /* Error page */
 .error { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .error h1 { font-size: var(--f20); }
+
+/* Home */
+.home-head h1 { display: flex; align-items: flex-start; gap: 8px; font-size: var(--f20); line-height: 1.3; }
+.home-head h1 svg { color: var(--accent); margin-top: 2px; }
+.chart { margin: 0; }
+.warn-card { border: 1px solid var(--warn); }
+.warn-card h2 { display: flex; align-items: center; gap: 8px; color: var(--warn); }
+.warn-card .link { min-height: 44px; }
+.home-list { display: flex; flex-direction: column; gap: 8px; }
+.empty { padding: 16px 14px; }
+.vh, table.list.home thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+table.list.home, table.list.home tbody { display: block; width: 100%; }
+table.list.home td { display: block; padding: 0; }
+table.list.home td.sp { flex: 1; min-width: 0; }
+table.list.home td.sp > a { display: flex; align-items: center; gap: 12px; min-height: 56px; color: inherit; text-decoration: none; }
+table.list.home td.when, table.list.home td.count { display: none; }
+.row-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.home .chip { border: 0; padding: 1px 8px; }
+@media (min-width: 900px) {
+  .home-head h1 { align-items: center; gap: 10px; font-size: var(--f28); line-height: 1.2; }
+  .home-head h1 svg { width: 26px; height: 26px; margin-top: 0; }
+  .home-head .summary { font-size: var(--f17); }
+  .chart { padding: 14px 18px; }
+  .chart .bars { height: 56px; }
+  .home-list { background: var(--surface); border-radius: var(--radius); gap: 0; overflow-x: auto; }
+  .home-list > h2 { padding: 14px 18px 8px; }
+  table.list.home { display: table; border-collapse: collapse; min-width: 520px; border-radius: 0; }
+  table.list.home thead { position: static; width: auto; height: auto; overflow: visible; clip-path: none; display: table-header-group; }
+  table.list.home tbody { display: table-row-group; }
+  table.list.home tr.row { display: table-row; }
+  table.list.home th { text-align: left; font-size: var(--f13); font-weight: 600; color: var(--muted); padding: 8px 12px; }
+  table.list.home td, table.list.home td.when, table.list.home td.count { display: table-cell; padding: 8px 12px; vertical-align: middle; border-top: 1px solid var(--line); }
+  table.list.home th:first-child, table.list.home td:first-child { padding-left: 18px; }
+  table.list.home th:last-child, table.list.home td:last-child { padding-right: 18px; text-align: right; }
+  table.list.home td.count span { display: block; }
+  table.list.home .row-sub { display: none; }
+  table.list.home .photo { width: 48px; height: 48px; }
+}
