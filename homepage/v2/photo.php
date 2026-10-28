@@ -72,28 +72,64 @@ function v2_photo_redirect(string $url): void
     header('Location: ' . v2_thumb_url($url, V2_THUMB_WIDTH));
 }
 
+/**
+ * Claims the fetch for $key before any network call: creates the marker file exclusively, so a
+ * concurrent request for the same species sees it and answers at once instead of fetching too.
+ * The marker doubles as the back-off: kept on failure (600 s), removed on success.
+ */
+function v2_photo_claim(string $key): bool
+{
+    $file = v2_cache_file($key);
+    $dir = dirname($file);
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0700, true);
+    }
+    for ($try = 0; $try < 2; $try++) {
+        $fh = @fopen($file, 'x');
+        if ($fh !== false) {
+            fwrite($fh, json_encode(['v' => time()]));
+            fclose($fh);
+            return true;
+        }
+        clearstatcache(true, $file);
+        $mtime = @filemtime($file);
+        if ($mtime !== false && $mtime + V2_PHOTO_FAIL_TTL > time()) {
+            return false; // in flight, or failed within the last 10 min
+        }
+        @unlink($file); // expired back-off: take it over
+    }
+    return false;
+}
+
+/** After a fetch: success drops the marker, failure restarts its 600 s from now. */
+function v2_photo_release(string $key, bool $ok): void
+{
+    $file = v2_cache_file($key);
+    $ok ? @unlink($file) : @touch($file);
+}
+
 $row = v2_photo_row(__ROOT__ . '/scripts/' . ($flickr ? 'flickr.db' : 'wikipedia.db'), $sci);
 
 if ($row !== null) {
     v2_photo_redirect($row['image_url']);
-    if (v2_photo_is_stale($row['date_created']) && v2_cache_read($marker, V2_PHOTO_FAIL_TTL) === null
-        && function_exists('fastcgi_finish_request')) {
+    if (v2_photo_is_stale($row['date_created']) && function_exists('fastcgi_finish_request')) {
         fastcgi_finish_request(); // the browser has its redirect; refresh in the background
-        $image = v2_photo_fetch($flickr, $sci);
-        if ($image === false || v2_photo_is_stale($image['date_created'] ?? null)) {
-            v2_cache_write($marker, time()); // old row kept; don't retry for 10 min
+        if (v2_photo_claim($marker)) {
+            $image = v2_photo_fetch($flickr, $sci);
+            // Old row kept on failure; don't retry for 10 min.
+            v2_photo_release($marker, $image !== false && !v2_photo_is_stale($image['date_created'] ?? null));
         }
     }
     exit;
 }
 
-if (v2_cache_read($marker, V2_PHOTO_FAIL_TTL) === null) {
+if (v2_photo_claim($marker)) {
     $image = v2_photo_fetch($flickr, $sci);
+    v2_photo_release($marker, $image !== false);
     if ($image !== false) {
         v2_photo_redirect($image['image_url']);
         exit;
     }
-    v2_cache_write($marker, time());
 }
 http_response_code(404);
 header('Cache-Control: max-age=600');
