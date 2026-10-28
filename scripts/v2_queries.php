@@ -479,7 +479,7 @@ function v2_window_fp_prefetch(array $boots): void
 {
     $wins = [];
     foreach ($boots as $b) {
-        if (!$b['current'] && !v2_boot_timeless($b)) {
+        if (!$b['current'] && $b['until'] !== null && !v2_boot_timeless($b)) {
             $wins[] = v2_session_params($b['start'], $b['until']);
         }
     }
@@ -1025,11 +1025,20 @@ function v2_boot_map_write(array $map): void
     }
 }
 
+/** This boot's id as journald writes it (32 hex, no dashes), or null when unreadable. */
+function v2_current_boot_id(): ?string
+{
+    $id = str_replace('-', '', trim((string) @file_get_contents('/proc/sys/kernel/random/boot_id')));
+    return preg_match('/^[0-9a-f]{32}$/', $id) ? $id : null;
+}
+
 /**
  * The merged boot list, newest first: the current boot, then every finished boot from
- * `--list-boots` (cached 60 s) or only from the persisted map (vacuumed from the journal), by
- * last entry. Memoised per request. @return list<array{id:string, first_us:int, last_us:int,
- *   current:bool, journal:bool}>
+ * `--list-boots` (cached 60 s; a failed call is not cached) or only from the persisted map
+ * (vacuumed from the journal), by last entry. When the list call fails but the map has boots,
+ * the current boot is made up from the kernel's boot id and v2_session_start(), so the newest
+ * finished boot still ends where it began. Memoised per request.
+ * @return list<array{id:string, first_us:int, last_us:int, current:bool, journal:bool}>
  */
 function v2_boot_list(): array
 {
@@ -1037,10 +1046,22 @@ function v2_boot_list(): array
     if (isset($s['list'])) {
         return $s['list'];
     }
-    $raw = v2_cache('boots', 60, fn () => json_decode(v2_journalctl(['--list-boots', '-o', 'json']) ?? '[]', true) ?: []);
+    $hit = v2_cache_read('boots', 60);
+    if ($hit !== null && is_array($hit[0])) {
+        $raw = $hit[0];
+    } else {
+        $out = v2_journalctl(['--list-boots', '-o', 'json']);
+        $raw = $out === null ? null : v2_cache_write('boots', json_decode($out, true) ?: []);
+    }
     $s['facts'] = v2_boot_map_read();
     $current = [];
     $done = [];
+    if ($raw === null && $s['facts'] !== []) {
+        $cur = v2_current_boot_id();
+        $start = v2_session_start()->getTimestamp() * 1000000;
+        $current[] = ['id' => $cur ?? md5('boot-' . $start), 'first_us' => $start, 'last_us' => v2_now()->getTimestamp() * 1000000,
+            'current' => true, 'journal' => false];
+    }
     foreach (is_array($raw) ? $raw : [] as $b) {
         if (!is_array($b) || !is_string($b['boot_id'] ?? null) || !preg_match('/^[0-9a-f]{32}$/', $b['boot_id'])) {
             continue;
@@ -1217,7 +1238,9 @@ function v2_session_card(array $boot): array
             'top' => array_map(static fn ($r) => ['sci' => $r['Sci_Name'], 'nl' => v2_names($r['Sci_Name'])['nl']], array_slice($top, 0, 3)),
         ];
     };
-    if ($boot['current']) {
+    if ($boot['current'] || $boot['until'] === null) {
+        // A finished boot without an end (no current boot listed) is shown open-ended, like the
+        // current one, and never cached or persisted: its window has no fingerprint of its own.
         return $card(v2_session_rows($boot['start'], $boot['until']));
     }
     if (v2_boot_timeless($boot)) {
