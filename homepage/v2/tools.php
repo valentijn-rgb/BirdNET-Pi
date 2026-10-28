@@ -39,7 +39,7 @@ v2_guard(function (): void {
 <p class="small muted">Onderbreekt het luisteren. Vraagt eerst om bevestiging.</p>
 <?php foreach (V2_SYSTEM as [$summary, $why, $cmd, $button]) { ?>
 <details>
-<summary><?= h($summary) ?></summary>
+<summary><svg class="chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><?= h($summary) ?></summary>
 <form class="confirm" action="/views.php" method="get"><span class="small muted"><?= h($why) ?></span><button class="button warn" name="submit" value="<?= h($cmd) ?>"><?= h($button) ?></button></form>
 </details>
 <?php } ?>

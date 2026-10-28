@@ -105,8 +105,11 @@ main { flex: 1; width: 100%; max-width: 960px; margin: 0 auto; padding: 20px 16p
 .spectro img { height: 200px; width: auto; max-width: none; display: block; }
 
 /* Disclosure */
-summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 600; }
+summary { min-height: 44px; display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; font-weight: 600; }
 summary::-webkit-details-marker { display: none; }
+.chevron { color: var(--muted); transition: transform .15s; }
+details[open] > summary .chevron { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .chevron { transition: none; } }
 
 /* Species table (desktop) */
 table.species { width: 100%; border-collapse: collapse; }
