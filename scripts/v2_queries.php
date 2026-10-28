@@ -400,9 +400,46 @@ function v2_session_rows(DateTimeImmutable $since, ?DateTimeImmutable $until = n
     $key = v2_db_path() . '|' . implode(' ', $params);
     $memo = &v2_session_memo();
     if (!array_key_exists($key, $memo)) {
-        $memo = [$key => $until === null ? v2_q('session_species', $params) : v2_window_rows($params)];
+        $memo = [$key => $until === null ? v2_q('session_species', $params) : v2_window_data($params)['rows']];
     }
     return $memo[$key];
+}
+
+/**
+ * Fingerprint of a finished window: [row count, max rowid]. Keys its cached card and data. The
+ * statement is prepared once per request (and DB), since Sessies runs it for every listed boot.
+ * @return array{0:int, 1:int}
+ */
+function v2_window_fp(array $params): array
+{
+    static $run = null, $path = null;
+    if ($run === null || $path !== v2_db_path()) {
+        $run = v2_stmt('window_fp');
+        $path = v2_db_path();
+    }
+    $fp = $run(array_intersect_key($params, array_flip([':d', ':t', ':d2', ':t2'])))[0] ?? [];
+    return [(int) ($fp['n'] ?? 0), (int) ($fp['m'] ?? 0)];
+}
+
+/**
+ * A finished window's rows (v2_window_rows) and window_hours rows, cached in /dev/shm under its
+ * fingerprint (ttl 0): a finished session only changes when rows inside it are added or deleted,
+ * and that changes the key. Older entries of the same window are removed.
+ * @return array{rows: list<array>, hours: list<array>}
+ */
+function v2_window_data(array $params): array
+{
+    [$n, $m] = v2_window_fp($params);
+    $id = substr(md5(v2_db_path() . '|' . implode(' ', $params)), 0, 16);
+    $key = "window-$id-$n-$m";
+    $hit = v2_cache_read($key, 0);
+    if ($hit !== null && is_array($hit[0]['rows'] ?? null) && is_array($hit[0]['hours'] ?? null)) {
+        return $hit[0];
+    }
+    foreach (glob(v2_cache_dir() . "/window-$id-*.json") ?: [] as $old) {
+        @unlink($old);
+    }
+    return v2_cache_write($key, ['rows' => v2_window_rows($params), 'hours' => v2_q('window_hours', $params)]);
 }
 
 /** window_species plus, per species, the clip columns of its newest detection inside the window. */
@@ -493,7 +530,7 @@ function v2_session_hours(DateTimeImmutable $since, ?string $sci = null, ?DateTi
     }
     $params = v2_session_params($since, $until);
     $rows = match (true) {
-        $until !== null => v2_q('window_hours', $params),
+        $until !== null => v2_window_data($params)['hours'],
         $sci === null => v2_q('session_hours', $params),
         default => v2_q('species_session_hours', $params + [':s' => $sci]),
     };
@@ -974,8 +1011,8 @@ function v2_session_card(array $boot): array
         return $card([]);
     }
     $params = v2_session_params($boot['start'], $boot['until']);
-    $fp = v2_q('window_fp', $params)[0] ?? [];
-    $key = 'session-' . $boot['id'] . '-' . (int) ($fp['n'] ?? 0) . '-' . (int) ($fp['m'] ?? 0);
+    [$n, $m] = v2_window_fp($params);
+    $key = 'session-' . $boot['id'] . '-' . $n . '-' . $m;
     $hit = v2_cache_read($key, 0);
     if ($hit !== null && is_array($hit[0])) {
         return $hit[0];
