@@ -190,6 +190,11 @@ if grep -q 'birdnet_server.service' "$HOME/BirdNET-Pi/templates/birdnet_analysis
     systemctl daemon-reload && restart_services.sh
 fi
 
+if ! [ -f "$HOME/BirdNET-Pi/templates/boot_notify.service" ]; then
+   install_boot_notify_service
+   chown $USER:$USER "$HOME/BirdNET-Pi/templates/boot_notify.service"
+fi
+
 TMP_MOUNT=$(systemd-escape -p --suffix=mount "$RECS_DIR/StreamData")
 if ! [ -f "$HOME/BirdNET-Pi/templates/$TMP_MOUNT" ]; then
    install_birdnet_mount

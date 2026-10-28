@@ -421,6 +421,7 @@ install_services() {
   install_gotty_logs
   install_phpsysinfo
   install_livestream_service
+  install_boot_notify_service
   install_birdnet_mount
   install_cleanup_cron
   install_weekly_cron

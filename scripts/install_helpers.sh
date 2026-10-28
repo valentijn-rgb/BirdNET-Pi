@@ -62,6 +62,28 @@ EOF
   ln -sf $HOME/BirdNET-Pi/templates/$TMP_MOUNT /usr/lib/systemd/system
 }
 
+install_boot_notify_service() {
+  # Type=simple: a oneshot would hold up multi-user.target while it waits for audio
+  cat << EOF > $HOME/BirdNET-Pi/templates/boot_notify.service
+[Unit]
+Description=BirdNET-Pi boot notification
+Wants=network-online.target
+After=network-online.target birdnet_recording.service
+
+[Service]
+Type=simple
+User=${USER}
+WorkingDirectory=$HOME/BirdNET-Pi/scripts
+ExecStart=$HOME/BirdNET-Pi/birdnet/bin/python3 $HOME/BirdNET-Pi/scripts/boot_notify.py
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  ln -sf $HOME/BirdNET-Pi/templates/boot_notify.service /usr/lib/systemd/system
+  systemctl daemon-reload
+  systemctl enable boot_notify.service
+}
+
 install_tmp_mount() {
   STATE=$(systemctl is-enabled tmp.mount 2>&1 | grep -E '(enabled|disabled|static)')
   ! [ -f /usr/share/systemd/tmp.mount ] && echo "Warning: no /usr/share/systemd/tmp.mount found"
