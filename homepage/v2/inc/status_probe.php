@@ -285,9 +285,18 @@ function v2_pi_items(string $recs, int $purge, ?int $uptime_s): array
     return $items;
 }
 
+/**
+ * The Wi-Fi name from nmcli's GENERAL.CONNECTION. That is the NetworkManager profile name, which
+ * netplan (Raspberry Pi OS Trixie) creates as "netplan-<iface>-<SSID>"; show the SSID.
+ */
+function v2_wifi_name(string $connection): string
+{
+    return preg_replace('/^netplan-[A-Za-z0-9_.-]+?-(?=.)/', '', $connection, 1) ?? $connection;
+}
+
 function v2_net_items(): array
 {
-    $ssid = v2_sh('nmcli -t -g GENERAL.CONNECTION device show wlan0');
+    $ssid = v2_wifi_name(v2_sh('nmcli -t -g GENERAL.CONNECTION device show wlan0'));
     $signal = null;
     $wireless = v2_read('/proc/net/wireless');
     if ($wireless !== null && preg_match('/^\s*wlan0:\s+\S+\s+([\d.]+)/m', $wireless, $m)) {
