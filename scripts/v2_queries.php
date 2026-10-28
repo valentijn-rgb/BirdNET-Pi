@@ -60,8 +60,8 @@ const V2_SQL = [
     'window_species' => "SELECT Sci_Name, COUNT(*) AS n, MAX(Date||' '||Time) AS last, MIN(Confidence) AS cmin, MAX(Confidence) AS cmax
         FROM detections WHERE " . V2_WINDOW_WHERE . ' GROUP BY Sci_Name ORDER BY last DESC',
     'window_hours' => 'SELECT substr(Time,1,2) AS h, COUNT(*) AS n FROM detections WHERE ' . V2_WINDOW_WHERE . ' GROUP BY h',
-    // Fingerprint of a finished window (row count, max rowid, confidence sum): keys its cached Sessies card.
-    'window_fp' => 'SELECT COUNT(*) AS n, MAX(rowid) AS m, TOTAL(Confidence) AS c FROM detections WHERE ' . V2_WINDOW_WHERE,
+    // Fingerprint of a finished window (row count + max rowid): keys its cached Sessies card.
+    'window_fp' => 'SELECT COUNT(*) AS n, MAX(rowid) AS m FROM detections WHERE ' . V2_WINDOW_WHERE,
     'window_last_row' => 'SELECT Date, Time, Com_Name, Confidence, File_Name FROM detections
         WHERE Sci_Name = :s AND Date <= :d2 AND (Date < :d2 OR Time < :t2) ORDER BY Date DESC, Time DESC LIMIT 1',
 ];
@@ -411,10 +411,12 @@ function v2_session_rows(DateTimeImmutable $since, ?DateTimeImmutable $until = n
 }
 
 /**
- * Fingerprint of a finished window, "count-maxrowid-confidencesum": keys its cached card and data.
- * The content term TOTAL(Confidence) changes when a row is edited in place, as BirdNET-Pi's
- * Change Detection does (birdnet_changeidentification.sh: new species, Confidence 0, new file),
- * which leaves the count and max rowid alone. Prepared once per request (and DB).
+ * Fingerprint of a finished window, "count-maxrowid": keys its cached card and data, so rows
+ * added or deleted inside it rebuild them. A row edited in place (BirdNET-Pi's Change Detection:
+ * birdnet_changeidentification.sh UPDATEs species, confidence and file) keeps the fingerprint;
+ * v2_session_ttl() catches that within a day. (A content term such as TOTAL(Confidence) would
+ * catch it at once, but it needs the table rows, not just the Date index: +2 ms warm on Sessies.)
+ * Prepared once per request (and DB).
  */
 function v2_window_fp(array $params): string
 {
@@ -431,10 +433,28 @@ function v2_window_fp(array $params): string
     return v2_fp_string($run($p)[0] ?? []);
 }
 
-/** window_fp row → "n-m-c" (c to 4 decimals, enough for confidences stored to 4 places). */
+/** window_fp row → "n-m". */
 function v2_fp_string(array $r): string
 {
-    return sprintf('%d-%d-%.4f', (int) ($r['n'] ?? 0), (int) ($r['m'] ?? 0), (float) ($r['c'] ?? 0));
+    return sprintf('%d-%d', (int) ($r['n'] ?? 0), (int) ($r['m'] ?? 0));
+}
+
+/**
+ * How long a finished session's cached card and data (in /dev/shm and the state dir) are trusted
+ * before they are rebuilt: a day, plus up to 6 h spread by boot id so the cards of one Sessies
+ * page do not all expire on the same request. Bounds how long an in-place edit stays unseen.
+ */
+function v2_session_ttl(string $id): int
+{
+    return 86400 + crc32($id) % 21600;
+}
+
+/** A part (card|window) of the boot's state entry when saved under $fp less than $ttl s ago: [value, saved at]. */
+function v2_session_saved(string $id, string $fp, string $part, int $ttl): ?array
+{
+    $e = v2_session_state_read($id, $fp);
+    $at = (int) ($e[$part . '_at'] ?? 0);
+    return isset($e[$part]) && time() - $at < $ttl ? [$e[$part], $at] : null;
 }
 
 /**
@@ -491,8 +511,9 @@ function v2_window_fp_prefetch(array $boots): void
 
 /**
  * A finished window's rows (v2_window_rows) and window_hours rows, cached in /dev/shm under its
- * fingerprint (ttl 0): a finished session only changes when rows inside it are added, deleted or edited,
- * and that changes the key. Older entries of the same window are removed.
+ * fingerprint: a finished session only changes when rows inside it are added or deleted, and
+ * that changes the key. Older entries of the same window are removed. A boot's window entry is
+ * rebuilt after v2_session_ttl() (rows edited in place).
  * For a boot's window (registered by v2_session_card) the data is also kept in the state dir,
  * so after a reboot (empty /dev/shm) it is read back instead of queried again.
  * @return array{rows: list<array>, hours: list<array>}
@@ -514,7 +535,8 @@ function v2_window_data(array $params): array
 function v2_window_load(array $params, ?string $boot, string $fp, string $id, string $key): array
 {
     $valid = static fn ($v) => is_array($v) && is_array($v['rows'] ?? null) && is_array($v['hours'] ?? null) && is_array($v['first'] ?? null);
-    $hit = v2_cache_read($key, 0);
+    $ttl = $boot !== null ? v2_session_ttl($boot) : 0;
+    $hit = v2_cache_read($key, $ttl);
     if ($hit !== null && $valid($hit[0])) {
         return $hit[0];
     }
@@ -522,9 +544,11 @@ function v2_window_load(array $params, ?string $boot, string $fp, string $id, st
         @unlink($old);
     }
     if ($boot !== null) {
-        $saved = v2_session_state_read($boot, $fp)['window'] ?? null;
+        [$saved, $at] = v2_session_saved($boot, $fp, 'window', $ttl) ?? [null, 0];
         if ($valid($saved)) {
-            return v2_cache_write($key, $saved);
+            $data = v2_cache_write($key, $saved);
+            @touch(v2_cache_file($key), $at); // expires with the saved entry, not a day after the reboot
+            return $data;
         }
     }
     $rows = v2_window_rows($params);
@@ -564,6 +588,9 @@ function v2_session_state_write(string $id, string $fp, array $part): void
     if (!preg_match('/^[0-9a-f]{32}$/', $id) || (!is_dir($dir) && !@mkdir($dir, 0700) && !is_dir($dir))) {
         error_log("v2: cannot write session state $dir/$id.json");
         return;
+    }
+    foreach (array_keys($part) as $k) {
+        $part[$k . '_at'] = time();
     }
     $json = json_encode(['fp' => $fp] + $part + v2_session_state_read($id, $fp), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     $tmp = @tempnam($dir, '.s-');
@@ -1162,7 +1189,7 @@ function v2_boot_timeless(array $boot): bool
 /**
  * List-row numbers of a session: totals, the newest detection ('Y-m-d H:i:s' or null) and the
  * 3 species heard most (ties: newest first). A finished boot's card is built from window_species
- * alone and cached under the window's fingerprint (v2_window_fp: count, max rowid and confidence sum inside it), so new
+ * alone and cached under the window's fingerprint (v2_window_fp: count and max rowid inside it; rebuilt after v2_session_ttl()), so new
  * detections in the current session leave it alone and a deletion inside it rebuilds it; older
  * versions are removed. It is also kept in the state dir (v2_session_state_write), which survives
  * a reboot; /dev/shm stays the fast layer. The current boot's card is not cached.
@@ -1192,7 +1219,8 @@ function v2_session_card(array $boot): array
     $s['windows'][implode(' ', $params)] = ['id' => $boot['id'], 'fp' => $fp]; // for v2_window_data
     unset($s);
     $key = 'session-' . $boot['id'] . '-' . $fp;
-    $hit = v2_cache_read($key, 0);
+    $ttl = v2_session_ttl($boot['id']);
+    $hit = v2_cache_read($key, $ttl);
     if ($hit !== null && is_array($hit[0])) {
         return $hit[0];
     }
@@ -1200,9 +1228,11 @@ function v2_session_card(array $boot): array
         @unlink($old);
     }
     // After a reboot /dev/shm is empty, but the state dir still has the card.
-    $saved = v2_session_state_read($boot['id'], $fp)['card'] ?? null;
+    [$saved, $at] = v2_session_saved($boot['id'], $fp, 'card', $ttl) ?? [null, 0];
     if (is_array($saved)) {
-        return v2_cache_write($key, $saved);
+        $built = v2_cache_write($key, $saved);
+        @touch(v2_cache_file($key), $at);
+        return $built;
     }
     $built = v2_cache_write($key, $card(v2_q('window_species', $params)));
     v2_session_state_write($boot['id'], $fp, ['card' => $built]);
