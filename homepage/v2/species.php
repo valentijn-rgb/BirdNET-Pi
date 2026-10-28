@@ -22,11 +22,11 @@ const V2_SORT_NONE = ['M8 9l4-4 4 4', 'M16 15l-4 4-4-4'];
 const V2_SORT_ASC = ['M12 19V5', 'M5 12l7-7 7 7'];
 const V2_SORT_DESC = ['M12 5v14', 'M19 12l-7 7-7-7'];
 
-/** Species rows per list page (?spage=; ?page= pages the recordings of the open species). */
+/** Species rows per list page (?spage=). */
 const V2_SPECIES_PER_PAGE = 50;
 
-/** Highest recordings page accepted in ?page= (a larger value would overflow the OFFSET). */
-const V2_MAX_PAGE = 100000;
+/** The detail lists only the newest recordings, closed by default; no recordings paging (?page= is ignored). */
+const V2_RECENT_RECS = 5;
 
 /** /v2/species.php?… from the non-empty parameters (spaces as +). */
 function v2_species_url(array $params, string $hash = ''): string
@@ -68,7 +68,6 @@ v2_guard(function (): void {
     $boot = $from === 'sessions' && is_string($_GET['boot'] ?? null) && preg_match('/^[0-9a-f]{32}$/', $_GET['boot']) ? $_GET['boot'] : null;
     // Where the detail was opened from, kept through sorting and paging (Home, or a session on Sessies).
     $origin = ['from' => $from === 'species' ? '' : $from, 'boot' => $boot];
-    $page = min(V2_MAX_PAGE, max(1, is_string($_GET['page'] ?? null) ? (int) $_GET['page'] : 1));
 
     $all = v2_species_all();
     $rows = v2_species_sort($all, $sort, $dir);
@@ -87,10 +86,10 @@ v2_guard(function (): void {
         $hours = v2_session_hours($since, $sci);
         $sessionN = array_sum($hours); // the same session rows, so no separate count query
         $days = v2_species_days($sci, 30);
-        $recs = v2_species_recordings($sci, $page, 20);
+        $recs = v2_species_recordings($sci, 1, V2_RECENT_RECS);
     }
 
-    // Sort and list page, kept by row links, the back link and the recordings pager.
+    // Sort and list page, kept by row links and the back link.
     $base = ['sort' => $sort, 'dir' => $dir, 'spage' => $spage > 1 ? $spage : null];
     v2_page_start($detail ? $detail['names']['nl'] : 'Soorten', 'species', $detail ? $from : '');
     $total = array_sum(array_column($all, 'n'));
@@ -177,8 +176,7 @@ foreach ($shown as $r) {
     };
     $dayKeys = array_keys($days);
     $note = v2_station_note($all, $now);
-    $shownFrom = ($page - 1) * 20 + 1;
-    $shownTo = $shownFrom + count($recs['rows']) - 1;
+    $nRecs = count($recs['rows']);
     $groups = [];
     foreach ($recs['rows'] as $rec) {
         $groups[$rec['Date']][] = $rec;
@@ -208,7 +206,8 @@ foreach ($shown as $r) {
 <?php if ($note !== '') { ?><p class="small muted"><?= h($note) ?></p><?php } ?>
 </figure>
 <section class="recs" aria-labelledby="recs-h">
-<h2 id="recs-h">Opnames · nieuwste eerst</h2>
+<details class="recs-box">
+<summary><?= v2_icon_ref('chevron', V2_CHEVRON, 18, 2) ?><h2 id="recs-h">Opnames · laatste <?= h(v2_fmt_int($nRecs)) ?></h2></summary>
 <?php foreach ($groups as $date => $list) { ?>
 <h3><?= h(v2_fmt_day_header($date, $now)) ?></h3>
 <ul class="list rec-list">
@@ -232,20 +231,8 @@ foreach ($shown as $r) {
 <?php } ?>
 </ul>
 <?php } ?>
-<?php if ($recs['rows'] === []) { ?>
-<p class="rec-count small muted">Geen opnames meer</p>
-<?php } else { ?>
-<p class="rec-count small muted"><?= $page > 1 ? h(v2_fmt_int($shownFrom) . '–' . v2_fmt_int($shownTo)) : h(v2_fmt_int($shownTo)) ?> van <?= h(v2_fmt_int($detail['n'])) ?> opnames</p>
-<?php } ?>
-<?php if ($recs['has_more'] || $page > 1) {
-    // Past the end, "Nieuwere opnames" goes to the last page that has rows.
-    $newer = $recs['rows'] === [] ? min($page - 1, max(1, (int) ceil($detail['n'] / 20))) : $page - 1;
-    ?>
-<div class="pager">
-<?php if ($page > 1) { ?><a class="link" href="<?= h(v2_species_url($base + ['sci' => $sci] + $origin + ['page' => $newer > 1 ? $newer : ''], '#detail')) ?>">Nieuwere opnames</a><?php } ?>
-<?php if ($recs['has_more']) { ?><a class="link more" href="<?= h(v2_species_url($base + ['sci' => $sci] + $origin + ['page' => $page + 1], '#detail')) ?>">Meer opnames</a><?php } ?>
-</div>
-<?php } ?>
+<p class="rec-count small muted"><?= h(v2_fmt_int($nRecs)) ?> van <?= h(v2_fmt_int($detail['n'])) ?> opnames</p>
+</details>
 </section>
 </div>
 </aside>

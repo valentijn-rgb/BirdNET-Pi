@@ -120,9 +120,10 @@ main:has(> .tools) { gap: 12px; }
 /* Disclosure */
 summary { min-height: 44px; display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; font-weight: var(--semi); }
 summary::-webkit-details-marker { display: none; }
-.chevron { color: var(--muted); transition: transform .15s; }
-details[open] > summary .chevron { transform: rotate(90deg); }
-@media (prefers-reduced-motion: reduce) { .chevron { transition: none; } }
+/* The chevron is the summary's leading icon (a class, or the first svg of a shared symbol). */
+.chevron, summary > svg:first-child { color: var(--muted); transition: transform .15s; }
+details[open] > summary .chevron, details[open] > summary > svg:first-child { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .chevron, summary > svg:first-child { transition: none; } }
 
 /* Tools */
 .tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -218,8 +219,11 @@ body:has(.species-page) main, body:has(.species-page) .topnav-in { max-width: 12
 .bars.spark path { fill: none; }
 .spark .bar { stroke: var(--bar); }
 .spark .bar-empty { stroke: var(--bar-empty); }
+/* Recordings: the newest few, in a closed expander */
 .recs { display: flex; flex-direction: column; gap: 8px; }
-.recs h3 { margin-top: 4px; }
+.recs-box > summary h2 { font-size: var(--f17); }
+.recs-box > h3 { margin: 12px 0 8px; }
+.recs-box > .rec-count { margin-top: 8px; }
 .rec { padding: 0 12px; }
 .rec + .rec { border-top: 1px solid var(--line); }
 .rec-main { display: flex; align-items: center; gap: 12px; min-height: 56px; }
@@ -275,7 +279,7 @@ body:has(.species-page) main, body:has(.species-page) .topnav-in { max-width: 12
   .detail .page-head { gap: 2px; }
   .detail .chart { padding: 0; gap: 6px; background: none; border-radius: 0; }
   .detail h1 { font-size: var(--f28); }
-  .detail .fig-title, .detail .recs > h2 { font-size: var(--f15); }
+  .detail .fig-title, .detail .recs-box > summary h2 { font-size: var(--f15); }
   .detail .hours .bars { height: 64px; }
   .detail .days .bars { height: 48px; }
   /* Flat recording rows */
@@ -284,6 +288,7 @@ body:has(.species-page) main, body:has(.species-page) .topnav-in { max-width: 12
   .detail .rec { padding: 0; border-top: 1px solid var(--line); }
   .detail .rec-main { min-height: 52px; }
   .detail .rec-time { font-size: var(--f15); }
+  .detail .recs-box > h3 { margin: 8px 0 4px; }
   .detail .rec-count { margin-top: 4px; }
 }
 
