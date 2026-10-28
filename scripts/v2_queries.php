@@ -42,8 +42,10 @@ const V2_SQL = [
         . ' GROUP BY substr(Time,1,2)',
     'last_row' => 'SELECT Date, Time, Com_Name, Confidence, File_Name FROM detections WHERE Sci_Name = :s ORDER BY Date DESC, Time DESC LIMIT 1',
     'first_seen' => "SELECT Date||' '||Time AS first FROM detections WHERE Sci_Name = :s ORDER BY Date, Time LIMIT 1",
-    'species_all' => "SELECT Sci_Name, COUNT(*) AS n, MIN(Date||' '||Time) AS first, MAX(Date||' '||Time) AS last
-        FROM detections WHERE +rowid <= :m GROUP BY Sci_Name",
+    'last_seen' => "SELECT Date||' '||Time AS last FROM detections WHERE Sci_Name = :s ORDER BY Date DESC, Time DESC LIMIT 1",
+    // Counts only: MIN/MAX(Date||' '||Time) here would build two strings per row (3× slower);
+    // first/last come from first_seen/last_seen, one index probe each per species.
+    'species_all' => 'SELECT Sci_Name, COUNT(*) AS n FROM detections WHERE +rowid <= :m GROUP BY Sci_Name',
     'species_d30' => 'SELECT Sci_Name, Date, COUNT(*) AS n FROM detections WHERE Date >= :from AND +rowid <= :m GROUP BY +Sci_Name, Date',
     'species_since' => 'SELECT Sci_Name, Date, COUNT(*) AS n, MIN(Time) AS tmin, MAX(Time) AS tmax
         FROM detections WHERE rowid > :after AND rowid <= :m GROUP BY +Sci_Name, Date',
@@ -552,7 +554,11 @@ function v2_species_index(): array
     return $e['rows'];
 }
 
-/** Full aggregate of rows up to rowid $max. */
+/**
+ * Full aggregate of rows up to rowid $max. Counts and d30 respect $max; first/last are probed
+ * without it, so a row inserted meanwhile may already show there. That is harmless: the next
+ * incremental step adds its count and takes min/max of first/last again.
+ */
 function v2_species_build(int $max): array
 {
     $days = v2_day_keys(30);
@@ -562,14 +568,21 @@ function v2_species_build(int $max): array
             $d30[$r['Sci_Name']][$r['Date']] = (int) $r['n'];
         }
     }
+    $firstSeen = v2_stmt('first_seen');
+    $lastSeen = v2_stmt('last_seen');
     $out = [];
     foreach (v2_q('species_all', [':m' => $max]) as $r) {
         $sci = $r['Sci_Name'];
+        $first = $firstSeen([':s' => $sci])[0]['first'] ?? null;
+        $last = $lastSeen([':s' => $sci])[0]['last'] ?? null;
+        if ($first === null || $last === null) {
+            continue; // deleted since the count
+        }
         $out[$sci] = [
             'sci' => $sci,
             'n' => (int) $r['n'],
-            'first' => $r['first'],
-            'last' => $r['last'],
+            'first' => $first,
+            'last' => $last,
             'd30' => array_values(array_replace($days, $d30[$sci] ?? [])),
             'names' => v2_names($sci),
         ];
