@@ -56,6 +56,8 @@ const V2_SQL = [
     'window_species' => "SELECT Sci_Name, COUNT(*) AS n, MAX(Date||' '||Time) AS last, MIN(Confidence) AS cmin, MAX(Confidence) AS cmax
         FROM detections WHERE " . V2_WINDOW_WHERE . ' GROUP BY Sci_Name ORDER BY last DESC',
     'window_hours' => 'SELECT substr(Time,1,2) AS h, COUNT(*) AS n FROM detections WHERE ' . V2_WINDOW_WHERE . ' GROUP BY h',
+    // Fingerprint of a finished window (row count + max rowid): keys its cached Sessies card.
+    'window_fp' => 'SELECT COUNT(*) AS n, MAX(rowid) AS m FROM detections WHERE ' . V2_WINDOW_WHERE,
     'window_last_row' => 'SELECT Date, Time, Com_Name, Confidence, File_Name FROM detections
         WHERE Sci_Name = :s AND Date <= :d2 AND (Date < :d2 OR Time < :t2) ORDER BY Date DESC, Time DESC LIMIT 1',
 ];
@@ -698,6 +700,9 @@ function v2_species_recordings(string $sci, int $page, int $per = 20): array
 // ---------------------------------------------------------------------------------------------
 // Boot history (Sessies): one session = one boot of the Pi, from the system journal.
 
+/** journald's "Journal stopped" entry (SD_MESSAGE_JOURNAL_STOP), logged on every clean shutdown. */
+const V2_JOURNAL_STOP = 'MESSAGE_ID=d93fb3c9c24d451a97cea615ce59c00b';
+
 /**
  * Runs `journalctl --no-pager -q <args>` (each argument shell-escaped, stderr dropped).
  * @return ?string the output lines joined with "\n" (possibly ''), or null on a non-zero exit
@@ -719,64 +724,195 @@ function v2_journalctl(array $args): ?string
     return $ok === false || $code !== 0 ? null : implode("\n", $out);
 }
 
+/** Persistent state (survives reboots, unlike the /dev/shm cache): v2_install.sh creates it for caddy. */
+function v2_state_dir(): string
+{
+    return getenv('BIRDS_STATE_DIR') ?: '/var/lib/birds-v2';
+}
+
 /**
- * Every boot in the journal, newest first. The current boot (index 0) starts at
- * v2_session_start() like Home and is still running (last = now, until = null, clean = null).
- * A finished boot's window is [start, until): until is the next newer boot's start.
- * The raw list is cached for 60 s, the facts of a finished boot for good (v2_boot_facts).
+ * Per-request state of the boot history: the merged boot list and the facts of finished boots
+ * (the persisted map plus what this request learned). Reset it with `$s = &v2_boots_state(); $s = [];`.
+ */
+function &v2_boots_state(): array
+{
+    static $state = [];
+    $key = v2_cache_dir() . '|' . v2_state_dir();
+    if (($state['key'] ?? null) !== $key) {
+        $state = ['key' => $key];
+    }
+    return $state;
+}
+
+/** The persisted facts map: boot id => {start_us?, clean, first_us, last_us}. */
+function v2_boot_map_read(): array
+{
+    $raw = @file_get_contents(v2_state_dir() . '/boots.json');
+    $map = $raw === false ? null : json_decode($raw, true);
+    return is_array($map) ? $map : [];
+}
+
+/** Writes the facts map atomically (temp file + rename in the state dir); a failure is only logged. */
+function v2_boot_map_write(array $map): void
+{
+    $dir = v2_state_dir();
+    $json = json_encode($map, JSON_UNESCAPED_SLASHES);
+    $tmp = is_dir($dir) ? @tempnam($dir, '.boots-') : false;
+    if ($json === false || $tmp === false || @file_put_contents($tmp, $json) !== strlen($json) || !@rename($tmp, "$dir/boots.json")) {
+        if ($tmp !== false) {
+            @unlink($tmp);
+        }
+        error_log("v2: cannot write $dir/boots.json");
+    }
+}
+
+/**
+ * The merged boot list, newest first: the current boot, then every finished boot from
+ * `--list-boots` (cached 60 s) or only from the persisted map (vacuumed from the journal), by
+ * last entry. Memoised per request. @return list<array{id:string, first_us:int, last_us:int,
+ *   current:bool, journal:bool}>
+ */
+function v2_boot_list(): array
+{
+    $s = &v2_boots_state();
+    if (isset($s['list'])) {
+        return $s['list'];
+    }
+    $raw = v2_cache('boots', 60, fn () => json_decode(v2_journalctl(['--list-boots', '-o', 'json']) ?? '[]', true) ?: []);
+    $s['facts'] = v2_boot_map_read();
+    $current = [];
+    $done = [];
+    foreach (is_array($raw) ? $raw : [] as $b) {
+        if (!is_array($b) || !is_string($b['boot_id'] ?? null) || !preg_match('/^[0-9a-f]{32}$/', $b['boot_id'])) {
+            continue;
+        }
+        $e = ['id' => $b['boot_id'], 'first_us' => (int) ($b['first_entry'] ?? 0), 'last_us' => (int) ($b['last_entry'] ?? 0),
+            'current' => (int) ($b['index'] ?? -1) === 0, 'journal' => true];
+        if ($e['current']) {
+            $current[] = $e;
+        } else {
+            $done[$e['id']] = $e;
+        }
+    }
+    foreach ($s['facts'] as $id => $f) {
+        if (!isset($done[$id]) && is_array($f) && preg_match('/^[0-9a-f]{32}$/', (string) $id) && ($current[0]['id'] ?? '') !== $id) {
+            $done[$id] = ['id' => (string) $id, 'first_us' => (int) ($f['first_us'] ?? 0), 'last_us' => (int) ($f['last_us'] ?? 0),
+                'current' => false, 'journal' => false];
+        }
+    }
+    $done = array_values($done);
+    usort($done, static fn ($a, $b) => $b['last_us'] <=> $a['last_us']);
+    return $s['list'] = [...$current, ...$done];
+}
+
+/**
+ * Makes sure the finished boots $ids have facts, with as few journalctl calls as possible:
+ * - one call for the clean-shutdown markers of *all* boots (UNIT=shutdown.target or journald's
+ *   "Journal stopped"): a marked boot is clean, and its start is __REALTIME_TIMESTAMP −
+ *   __MONOTONIC_TIMESTAMP of that entry (right even after a stale boot clock, once it synced);
+ *   an unmarked one lost power (clean = false);
+ * - per unmarked boot in $ids, one `-b <id> -n 1` call for its start the same way.
+ * Results of successful calls are persisted in the state dir; failures are retried next request.
+ */
+function v2_boot_resolve(array $ids): void
+{
+    $s = &v2_boots_state();
+    $byId = array_column(v2_boot_list(), null, 'id');
+    $changed = false;
+    $missing = array_filter($ids, fn ($id) => isset($byId[$id]) && $byId[$id]['journal'] && !$byId[$id]['current'] && !isset($s['facts'][$id]));
+    if ($missing !== [] && empty($s['markers_tried'])) {
+        $s['markers_tried'] = true;
+        $out = v2_journalctl(['-o', 'json', '--output-fields=_BOOT_ID,__REALTIME_TIMESTAMP,__MONOTONIC_TIMESTAMP',
+            'UNIT=shutdown.target', '+', V2_JOURNAL_STOP]);
+        if ($out !== null) {
+            $marked = [];
+            foreach (explode("\n", $out) as $line) {
+                $e = $line === '' ? null : json_decode($line, true);
+                if (is_array($e) && is_string($e['_BOOT_ID'] ?? null) && is_numeric($e['__REALTIME_TIMESTAMP'] ?? null) && is_numeric($e['__MONOTONIC_TIMESTAMP'] ?? null)) {
+                    $marked[$e['_BOOT_ID']] = (int) $e['__REALTIME_TIMESTAMP'] - (int) $e['__MONOTONIC_TIMESTAMP']; // the boot's last marker wins
+                }
+            }
+            foreach ($byId as $id => $b) {
+                if ($b['current'] || !$b['journal'] || isset($s['facts'][$id])) {
+                    continue;
+                }
+                $s['facts'][$id] = ['clean' => isset($marked[$id]), 'first_us' => $b['first_us'], 'last_us' => $b['last_us']]
+                    + (isset($marked[$id]) ? ['start_us' => $marked[$id]] : []);
+                $changed = true;
+            }
+        }
+    }
+    foreach ($ids as $id) {
+        $b = $byId[$id] ?? null;
+        if ($b === null || $b['current'] || !$b['journal'] || isset($s['facts'][$id]['start_us']) || isset($s['start_tried'][$id])) {
+            continue;
+        }
+        $s['start_tried'][$id] = true;
+        $out = v2_journalctl(['-b', $id, '-n', '1', '-o', 'json']);
+        $lines = $out === null ? [] : array_values(array_filter(explode("\n", $out), 'strlen'));
+        $e = $lines === [] ? null : json_decode(end($lines), true);
+        if (is_array($e) && is_numeric($e['__REALTIME_TIMESTAMP'] ?? null) && is_numeric($e['__MONOTONIC_TIMESTAMP'] ?? null)) {
+            $start = (int) $e['__REALTIME_TIMESTAMP'] - (int) $e['__MONOTONIC_TIMESTAMP'];
+            if (isset($s['facts'][$id])) {
+                $s['facts'][$id]['start_us'] = $start;
+                $changed = true;
+            } else {
+                $s['start_only'][$id] = $start; // clean unknown (marker call failed): not persisted
+            }
+        }
+    }
+    if ($changed) {
+        // Merge with what another request may have written meanwhile; ours wins per boot.
+        $map = v2_boot_map_read();
+        foreach ($s['facts'] as $id => $f) {
+            if (!isset($map[$id]['start_us']) || isset($f['start_us'])) {
+                $map[$id] = $f;
+            }
+        }
+        v2_boot_map_write($map);
+    }
+}
+
+/**
+ * Every boot, newest first. The current boot starts at v2_session_start() like Home and is still
+ * running (last = now, until = null, clean = null). A finished boot's window is [start, until):
+ * until is the next newer boot's start. Facts (start, clean) are looked up only for the boots at
+ * positions [$offset − 1, $offset + $limit) and the oldest one (all when $limit is null); any other
+ * finished boot whose facts are not known yet gets its first journal entry as start and clean null.
  * @return list<array{id:string, start:DateTimeImmutable, last:DateTimeImmutable,
  *   until:?DateTimeImmutable, current:bool, clean:?bool}>
  */
-function v2_boots(): array
+function v2_boots(int $offset = 0, ?int $limit = null): array
 {
-    $raw = v2_cache('boots', 60, fn () => json_decode(v2_journalctl(['--list-boots', '-o', 'json']) ?? '[]', true) ?: []);
-    $list = [];
-    foreach (is_array($raw) ? $raw : [] as $b) {
-        if (is_array($b) && is_string($b['boot_id'] ?? null) && preg_match('/^[0-9a-f]{32}$/', $b['boot_id'])) {
-            $list[] = $b;
-        }
+    $list = v2_boot_list();
+    $n = count($list);
+    if ($n === 0) {
+        return [];
     }
-    usort($list, static fn ($a, $b) => (int) ($b['index'] ?? 0) <=> (int) ($a['index'] ?? 0));
+    $from = max(0, $offset - 1);
+    $to = $limit === null ? $n : min($n, $offset + $limit);
+    $need = $from < $to ? range($from, $to - 1) : [];
+    $need[] = $n - 1;
+    v2_boot_resolve(array_map(fn ($i) => $list[$i]['id'], $need));
+
+    $s = &v2_boots_state();
     $tz = new DateTimeZone(v2_tz());
     $at = static fn (int $us): DateTimeImmutable => (new DateTimeImmutable('@' . intdiv($us, 1000000)))->setTimezone($tz);
     $out = [];
     $next = null; // start of the next newer boot
     foreach ($list as $b) {
-        $id = $b['boot_id'];
-        if ((int) ($b['index'] ?? -1) === 0) {
-            $boot = ['id' => $id, 'start' => v2_session_start(), 'last' => v2_now(), 'until' => null, 'current' => true, 'clean' => null];
+        if ($b['current']) {
+            $boot = ['id' => $b['id'], 'start' => v2_session_start(), 'last' => v2_now(), 'until' => null, 'current' => true, 'clean' => null];
         } else {
-            $f = v2_boot_facts($id, (int) ($b['first_entry'] ?? 0));
-            $boot = ['id' => $id, 'start' => $at((int) $f['start_us']), 'last' => $at((int) ($b['last_entry'] ?? 0)),
-                'until' => $next, 'current' => false, 'clean' => $f['clean']];
+            $f = $s['facts'][$b['id']] ?? null;
+            $start = $f['start_us'] ?? $s['start_only'][$b['id']] ?? $b['first_us'];
+            $boot = ['id' => $b['id'], 'start' => $at((int) $start), 'last' => $at($b['last_us']), 'until' => $next,
+                'current' => false, 'clean' => isset($f['clean']) ? (bool) $f['clean'] : null];
         }
         $next = $boot['start'];
         $out[] = $boot;
     }
     return $out;
-}
-
-/**
- * Start (µs) and shutdown marker of a finished boot, from two journalctl calls, cached for good
- * (a failed call too; /dev/shm is cleared on reboot).
- * - start_us = __REALTIME_TIMESTAMP − __MONOTONIC_TIMESTAMP of the boot's last entry: right even
- *   when the boot began on a stale clock (no RTC), once the clock synced; else $firstUs.
- * - clean: an entry for UNIT=shutdown.target → true, none → false (power lost), failure → null.
- * @return array{start_us:int, clean:?bool}
- */
-function v2_boot_facts(string $id, int $firstUs): array
-{
-    return v2_cache('boot-' . $id, 0, static function () use ($id, $firstUs): array {
-        $start = $firstUs;
-        $last = v2_journalctl(['-b', $id, '-n', '1', '-o', 'json']);
-        $lines = $last === null ? [] : array_values(array_filter(explode("\n", $last), 'strlen'));
-        $e = $lines === [] ? null : json_decode(end($lines), true);
-        if (is_array($e) && is_numeric($e['__REALTIME_TIMESTAMP'] ?? null) && is_numeric($e['__MONOTONIC_TIMESTAMP'] ?? null)) {
-            $start = (int) $e['__REALTIME_TIMESTAMP'] - (int) $e['__MONOTONIC_TIMESTAMP'];
-        }
-        $shutdown = v2_journalctl(['-b', $id, '-n', '1', '-o', 'json', 'UNIT=shutdown.target']);
-        return ['start_us' => $start, 'clean' => $shutdown === null ? null : trim($shutdown) !== ''];
-    });
 }
 
 /** One element of v2_boots(), or null for a malformed (no journalctl call) or unknown id. */
@@ -785,37 +921,45 @@ function v2_boot(string $id): ?array
     if (!preg_match('/^[0-9a-f]{32}$/', $id)) {
         return null;
     }
-    foreach (v2_boots() as $b) {
-        if ($b['id'] === $id) {
-            return $b;
-        }
-    }
-    return null;
+    $pos = array_search($id, array_column(v2_boot_list(), 'id'), true);
+    return $pos === false ? null : v2_boots($pos, 1)[$pos];
+}
+
+/** A finished boot whose start is not before its end (the clock never synced): no usable window. */
+function v2_boot_timeless(array $boot): bool
+{
+    return !$boot['current'] && $boot['until'] !== null && $boot['start'] >= $boot['until'];
 }
 
 /**
  * List-row numbers of a session: totals, the newest detection ('Y-m-d H:i:s' or null) and the
- * 3 species heard most (ties: newest first). A finished boot's card is cached per MAX(rowid)
- * (older versions of it are removed); the current boot's is not cached.
+ * 3 species heard most (ties: newest first). A finished boot's card is built from window_species
+ * alone and cached under the window's fingerprint (row count + max rowid inside it), so new
+ * detections in the current session leave it alone and a deletion inside it rebuilds it; older
+ * versions are removed. The current boot's card is not cached.
  * @return array{detections:int, species:int, last:?string, top:list<array{sci:string, nl:string}>}
  */
 function v2_session_card(array $boot): array
 {
-    $build = static function () use ($boot): array {
-        $rows = v2_session_species($boot['start'], $boot['until']);
+    $card = static function (array $rows): array {
         $top = $rows;
-        usort($top, static fn ($a, $b) => [$b['n'], $b['last']] <=> [$a['n'], $a['last']]);
+        usort($top, static fn ($a, $b) => [(int) $b['n'], $b['last']] <=> [(int) $a['n'], $a['last']]);
         return [
-            'detections' => array_sum(array_column($rows, 'n')),
+            'detections' => array_sum(array_map('intval', array_column($rows, 'n'))),
             'species' => count($rows),
-            'last' => $rows === [] ? null : $rows[0]['last']->format('Y-m-d H:i:s'),
-            'top' => array_map(static fn ($r) => ['sci' => $r['sci'], 'nl' => $r['names']['nl']], array_slice($top, 0, 3)),
+            'last' => $rows === [] ? null : max(array_column($rows, 'last')),
+            'top' => array_map(static fn ($r) => ['sci' => $r['Sci_Name'], 'nl' => v2_names($r['Sci_Name'])['nl']], array_slice($top, 0, 3)),
         ];
     };
     if ($boot['current']) {
-        return $build();
+        return $card(v2_session_rows($boot['start'], $boot['until']));
     }
-    $key = 'session-' . $boot['id'] . '-' . v2_db_key();
+    if (v2_boot_timeless($boot)) {
+        return $card([]);
+    }
+    $params = v2_session_params($boot['start'], $boot['until']);
+    $fp = v2_q('window_fp', $params)[0] ?? [];
+    $key = 'session-' . $boot['id'] . '-' . (int) ($fp['n'] ?? 0) . '-' . (int) ($fp['m'] ?? 0);
     $hit = v2_cache_read($key, 0);
     if ($hit !== null && is_array($hit[0])) {
         return $hit[0];
@@ -823,5 +967,5 @@ function v2_session_card(array $boot): array
     foreach (glob(v2_cache_dir() . '/session-' . $boot['id'] . '-*.json') ?: [] as $old) {
         @unlink($old);
     }
-    return v2_cache_write($key, $build());
+    return v2_cache_write($key, $card(v2_q('window_species', $params)));
 }

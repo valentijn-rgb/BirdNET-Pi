@@ -23,7 +23,11 @@ sudo -u "$USER" ln -sfn "$HOME/BirdNET-Pi/homepage/v2" "$EXTRACTED/v2"
 # 3. Dutch/English names for the v2 pages (git-ignored, regenerated on every update).
 sudo -u "$USER" php "$HOME/BirdNET-Pi/scripts/v2_make_labels.php"
 
-# 4. Persistent journal + journal read access for caddy (Sessies page). Pi config change, opt-in.
+# 4. Persistent state for the v2 pages (Sessies: facts of finished boots, kept across reboots).
+STATE_DIR=${V2_STATE_DIR:-/var/lib/birds-v2}
+install -d -o caddy -g caddy -m 0700 "$STATE_DIR"
+
+# 5. Persistent journal + journal read access for caddy (Sessies page). Pi config change, opt-in.
 JDROP_DIR=${V2_JOURNALD_DIR:-/etc/systemd/journald.conf.d}
 JDIR=${V2_JOURNAL_DIR:-/var/log/journal}
 JDROP="$JDROP_DIR/birds-persistent.conf"

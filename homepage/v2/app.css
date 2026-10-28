@@ -137,6 +137,7 @@ details[open] > summary .chevron { transform: rotate(90deg); }
 /* Home */
 .home-head h1 { display: flex; align-items: flex-start; gap: 8px; font-size: var(--f20); line-height: 1.3; }
 .home-head h1 svg { color: var(--accent); margin-top: 2px; }
+.home-head + .summary { margin-top: -8px; }
 .chart { margin: 0; }
 .warn-card { border: 1px solid var(--warn); }
 .warn-card h2 { display: flex; align-items: center; gap: 8px; color: var(--warn); }
@@ -154,7 +155,7 @@ table.list.home td.when, table.list.home td.count { display: none; }
 @media (min-width: 900px) {
   .home-head h1 { align-items: center; gap: 10px; font-size: var(--f28); line-height: 1.2; }
   .home-head h1 svg { width: 26px; height: 26px; margin-top: 0; }
-  .home-head + .summary { font-size: var(--f17); }
+  .home-head + .summary { font-size: var(--f17); margin-top: -16px; }
   .chart { padding: 14px 18px; }
   .chart .bars { height: 56px; }
   main > .home-list { background: var(--surface); border-radius: var(--radius); gap: 0; overflow-x: auto; }
@@ -252,7 +253,6 @@ table.species tr[aria-current] { background: var(--sel); }
 /* Sessies: one row per boot; the session detail beside the list from 900px (grid as Soorten) */
 body:has(.sessions-page) main, body:has(.sessions-page) .topnav-in { max-width: 1200px; }
 .sessions-page, .sessions-list { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.page-head + .summary { margin-top: -8px; }
 .sessions .row-text { flex: 1; }
 .sessions li[aria-current] { background: var(--sel); }
 .session-photos { display: flex; flex: none; }
@@ -269,7 +269,6 @@ body:has(.sessions-page) main, body:has(.sessions-page) .topnav-in { max-width: 
 li.rec .play.purged { width: 44px; height: 44px; min-height: 44px; border-radius: 50%; padding: 0; }
 @media (min-width: 900px) {
   .sessions-page { gap: 20px; }
-  main > .page-head + .summary { margin-top: -16px; }
   .sessions-page.has-detail { display: grid; }
   .has-detail .sessions-list { display: flex; }
   .session-detail .detail-body { padding: 14px 18px 18px; gap: 16px; }

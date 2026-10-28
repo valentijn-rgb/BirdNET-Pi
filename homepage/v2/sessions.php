@@ -37,12 +37,21 @@ function v2_session_end(array $boot, array $card): ?DateTimeImmutable
 /** "1 u 30 min · 13 detecties · 3 soorten", or "4 u 43 min · geen detecties". */
 function v2_session_sub(array $boot, array $card, DateTimeImmutable $now): string
 {
+    if (v2_boot_timeless($boot)) {
+        return 'tijd onbekend · geen detecties';
+    }
     $end = v2_session_end($boot, $card) ?? $now;
     $dur = v2_fmt_duration($end->getTimestamp() - $boot['start']->getTimestamp());
     if ($card['detections'] === 0) {
         return $dur . ' · geen detecties';
     }
     return $dur . ' · ' . v2_fmt_int($card['detections']) . ' detecties · ' . v2_fmt_int($card['species']) . ' ' . ($card['species'] === 1 ? 'soort' : 'soorten');
+}
+
+/** The session's span, or "Tijd onbekend" when its start is not before its end (clock never synced). */
+function v2_session_title(array $boot, array $card): string
+{
+    return v2_boot_timeless($boot) ? 'Tijd onbekend' : v2_fmt_span($boot['start'], v2_session_end($boot, $card));
 }
 
 /** /v2/sessions.php with ?page (when > 1) and ?boot. */
@@ -61,10 +70,11 @@ v2_guard(function (): void {
             v2_error_page(404, 'Sessie niet gevonden', 'Deze sessie staat niet (meer) in het systeemlogboek.');
         }
     }
-    $boots = v2_boots();
-    $k = count($boots);
+    $k = count(v2_boot_list());
     $pages = max(1, (int) ceil($k / V2_SESSIONS_PER_PAGE));
     $page = min($pages, max(1, is_string($_GET['page'] ?? null) ? (int) $_GET['page'] : 1));
+    // Facts (start, clean) are looked up only for this page, its newer neighbour and the oldest boot.
+    $boots = v2_boots(($page - 1) * V2_SESSIONS_PER_PAGE, V2_SESSIONS_PER_PAGE);
     $shown = array_slice($boots, ($page - 1) * V2_SESSIONS_PER_PAGE, V2_SESSIONS_PER_PAGE);
     $cards = [];
     foreach ($shown as $b) {
@@ -74,7 +84,7 @@ v2_guard(function (): void {
         $detailCard = $cards[$detail['id']] ?? v2_session_card($detail);
     }
 
-    v2_page_start($detail ? v2_fmt_span($detail['start'], v2_session_end($detail, $detailCard)) : 'Sessies', 'sessions');
+    v2_page_start($detail ? v2_session_title($detail, $detailCard) : 'Sessies', 'sessions');
     $headTag = $detail ? 'h2' : 'h1'; // one h1 per page: the session when the detail is open
     ?>
 <div class="sessions-page<?= $detail ? ' has-detail' : '' ?>">
@@ -96,7 +106,7 @@ v2_guard(function (): void {
 <?php foreach ($shown as $b) {
     $card = $cards[$b['id']];
     ?>
-<li class="row"<?= $detail && $detail['id'] === $b['id'] ? ' aria-current="true"' : '' ?>><a href="<?= h(v2_sessions_url($page, $b['id'])) ?>"><span class="row-text"><span class="row-head"><span class="row-title"><?= h(v2_fmt_span($b['start'], v2_session_end($b, $card))) ?></span><?= v2_session_chip($b) ?></span><span class="row-sub"><?= h(v2_session_sub($b, $card, $now)) ?></span></span><span class="session-photos"><?php foreach ($card['top'] as $t) { ?><?= v2_photo($t['sci'], $t['nl'], 40) ?><?php } ?></span></a></li>
+<li class="row"<?= $detail && $detail['id'] === $b['id'] ? ' aria-current="true"' : '' ?>><a href="<?= h(v2_sessions_url($page, $b['id'])) ?>"><span class="row-text"><span class="row-head"><span class="row-title"><?= h(v2_session_title($b, $card)) ?></span><?= v2_session_chip($b) ?></span><span class="row-sub"><?= h(v2_session_sub($b, $card, $now)) ?></span></span><span class="session-photos"><?php foreach ($card['top'] as $t) { ?><?= v2_photo($t['sci'], $t['nl'], 40) ?><?php } ?></span></a></li>
 <?php } ?>
 </ol>
 <?php
@@ -120,8 +130,8 @@ v2_guard(function (): void {
 <div class="detail-body">
 <header class="page-head">
 <a class="back-link" href="<?= h(v2_sessions_url($page)) ?>" data-back aria-label="Terug"><?= v2_icon(V2_BACK, 22, 2) ?>Terug</a>
-<h1 id="detail-h"><span><?= h(v2_fmt_span($detail['start'], $end)) ?></span><?= v2_session_chip($detail) ?></h1>
-<p class="muted">Duur <?= h(v2_fmt_duration($last->getTimestamp() - $detail['start']->getTimestamp())) ?> · laatst actief <?= h(v2_fmt_when($last, $now)) ?></p>
+<h1 id="detail-h"><span><?= h(v2_session_title($detail, $detailCard)) ?></span><?= v2_session_chip($detail) ?></h1>
+<p class="muted">Duur <?= h(v2_boot_timeless($detail) ? 'onbekend (de klok liep nog niet gelijk)' : v2_fmt_duration($last->getTimestamp() - $detail['start']->getTimestamp())) ?> · laatst actief <?= h(v2_fmt_when($last, $now)) ?></p>
 <?php if ($detail['clean'] === false) { ?>
 <p class="power-note small muted"><?= v2_icon(V2_ICON_POWER, 14, 2) ?>De stroom viel weg: de Pi sloot niet netjes af.</p>
 <?php } ?>
