@@ -14,21 +14,36 @@ const V2_SESSION_WHERE = 'Date >= :d AND (Date > :d OR Time >= :t)';
 
 /**
  * Named SQL used by v2_q(). Each one is checked by EXPLAIN QUERY PLAN in emulator/tests/php/ExplainTest.php.
- * `GROUP BY +Sci_Name`: the unary + stops SQLite from walking the whole (Sci_Name, Date, Time)
- * index to skip the GROUP BY sort; it then searches the Date range instead and sorts the few
- * groups. Without it session_species reads every row of the table (no sqlite_stat1 on the Pi).
+ * - `GROUP BY +Sci_Name`: the unary + stops SQLite from walking the whole (Sci_Name, Date, Time)
+ *   index to skip the GROUP BY sort; it then searches the Date (or rowid) range instead and sorts
+ *   the few groups. Without it session_species reads every row of the table (no sqlite_stat1 on the Pi).
+ * - `+rowid <= :m`: the species cache is built up to a known max rowid, so rows inserted while it
+ *   builds are picked up once by the next incremental step. The + keeps the bound out of the plan
+ *   (as a PK range it would read the whole table instead of the Date range or covering index).
+ * - session_species, inner `l`: Date, Com_Name, Confidence and File_Name are bare columns beside
+ *   the query's only min()/max() aggregate, so SQLite takes them from the row that has
+ *   MAX(Date||' '||Time), i.e. the species' latest detection (https://sqlite.org/lang_select.html#bareagg).
+ *   That rule needs exactly one min()/max() in the SELECT, so the confidence range comes from
+ *   the separate subquery `c`.
  */
 const V2_SQL = [
-    'db_key' => 'SELECT MAX(rowid) AS m, COUNT(*) AS c FROM detections',
-    'session_species' => "SELECT Sci_Name, COUNT(*) AS n, MAX(Date||' '||Time) AS last, MIN(Confidence) AS cmin, MAX(Confidence) AS cmax
-        FROM detections WHERE " . V2_SESSION_WHERE . ' GROUP BY +Sci_Name ORDER BY last DESC',
+    'db_key' => 'SELECT MAX(rowid) AS m FROM detections',
+    'session_species' => "SELECT l.Sci_Name, l.n, l.last, l.Date, l.Com_Name, l.Confidence, l.File_Name, c.cmin, c.cmax
+        FROM (SELECT Sci_Name, COUNT(*) AS n, MAX(Date||' '||Time) AS last, Date, Com_Name, Confidence, File_Name
+              FROM detections WHERE " . V2_SESSION_WHERE . ' GROUP BY +Sci_Name) AS l
+        JOIN (SELECT Sci_Name, MIN(Confidence) AS cmin, MAX(Confidence) AS cmax
+              FROM detections WHERE ' . V2_SESSION_WHERE . ' GROUP BY +Sci_Name) AS c USING (Sci_Name)
+        ORDER BY l.last DESC',
     'session_hours' => 'SELECT substr(Time,1,2) AS h, COUNT(*) AS n FROM detections WHERE ' . V2_SESSION_WHERE . ' GROUP BY substr(Time,1,2)',
     'species_session_hours' => 'SELECT substr(Time,1,2) AS h, COUNT(*) AS n FROM detections WHERE Sci_Name = :s AND ' . V2_SESSION_WHERE
         . ' GROUP BY substr(Time,1,2)',
     'last_row' => 'SELECT Date, Time, Com_Name, Confidence, File_Name FROM detections WHERE Sci_Name = :s ORDER BY Date DESC, Time DESC LIMIT 1',
     'first_seen' => "SELECT Date||' '||Time AS first FROM detections WHERE Sci_Name = :s ORDER BY Date, Time LIMIT 1",
-    'species_all' => "SELECT Sci_Name, COUNT(*) AS n, MIN(Date||' '||Time) AS first, MAX(Date||' '||Time) AS last FROM detections GROUP BY Sci_Name",
-    'species_d30' => 'SELECT Sci_Name, Date, COUNT(*) AS n FROM detections WHERE Date >= :from GROUP BY +Sci_Name, Date',
+    'species_all' => "SELECT Sci_Name, COUNT(*) AS n, MIN(Date||' '||Time) AS first, MAX(Date||' '||Time) AS last
+        FROM detections WHERE +rowid <= :m GROUP BY Sci_Name",
+    'species_d30' => 'SELECT Sci_Name, Date, COUNT(*) AS n FROM detections WHERE Date >= :from AND +rowid <= :m GROUP BY +Sci_Name, Date',
+    'species_since' => 'SELECT Sci_Name, Date, COUNT(*) AS n, MIN(Time) AS tmin, MAX(Time) AS tmax
+        FROM detections WHERE rowid > :after AND rowid <= :m GROUP BY +Sci_Name, Date',
     'species_detail' => "SELECT COUNT(*) AS n, MIN(Date||' '||Time) AS first, MAX(Date||' '||Time) AS last FROM detections WHERE Sci_Name = :s",
     'species_days' => 'SELECT Date, COUNT(*) AS n FROM detections WHERE Sci_Name = :s AND Date >= :from GROUP BY Date',
     'species_recordings' => 'SELECT Date, Time, Com_Name, Confidence, File_Name FROM detections WHERE Sci_Name = :s
@@ -209,20 +224,34 @@ function v2_cache_dir(): string
  */
 function v2_cache(string $key, int $ttl, callable $build): mixed
 {
-    $dir = v2_cache_dir();
-    $file = $dir . '/' . preg_replace('/[^A-Za-z0-9._-]/', '_', $key) . '.json';
+    $hit = v2_cache_read($key, $ttl);
+    return $hit !== null ? $hit[0] : v2_cache_write($key, $build());
+}
 
+function v2_cache_file(string $key): string
+{
+    return v2_cache_dir() . '/' . preg_replace('/[^A-Za-z0-9._-]/', '_', $key) . '.json';
+}
+
+/** @return ?array{0: mixed} the stored value wrapped in a 1-tuple, or null on a miss/expiry/corrupt file */
+function v2_cache_read(string $key, int $ttl): ?array
+{
+    $file = v2_cache_file($key);
     clearstatcache(true, $file);
     $mtime = @filemtime($file);
-    if ($mtime !== false && ($ttl === 0 || $mtime + $ttl > time())) {
-        $raw = @file_get_contents($file);
-        $data = $raw === false ? null : json_decode($raw, true);
-        if (is_array($data) && array_key_exists('v', $data)) {
-            return $data['v'];
-        }
+    if ($mtime === false || ($ttl !== 0 && $mtime + $ttl <= time())) {
+        return null;
     }
+    $raw = @file_get_contents($file);
+    $data = $raw === false ? null : json_decode($raw, true);
+    return is_array($data) && array_key_exists('v', $data) ? [$data['v']] : null;
+}
 
-    $value = $build();
+/** Stores $value atomically and returns it JSON round-tripped (the shape a later read gets). */
+function v2_cache_write(string $key, mixed $value): mixed
+{
+    $dir = v2_cache_dir();
+    $file = v2_cache_file($key);
     $json = json_encode(['v' => $value], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
     if ($json !== false) {
         $value = json_decode($json, true)['v']; // same shape as a hit
@@ -318,11 +347,10 @@ function v2_thumb_url(string $url, int $width = 320): string
 // ---------------------------------------------------------------------------------------------
 // Queries
 
-/** Changes on every insert or delete: "maxrowid:count". Versions the species cache. */
+/** MAX(rowid): O(1), grows on every insert. Versions the species cache. */
 function v2_db_key(): string
 {
-    $r = v2_q('db_key')[0] ?? [];
-    return (int) ($r['m'] ?? 0) . ':' . (int) ($r['c'] ?? 0);
+    return (string) (int) (v2_q('db_key')[0]['m'] ?? 0);
 }
 
 /** 'Y-m-d H:i:s' in the system timezone → DateTimeImmutable. */
@@ -338,48 +366,65 @@ function v2_session_params(DateTimeImmutable $since): array
     return [':d' => $local->format('Y-m-d'), ':t' => $local->format('H:i:s')];
 }
 
+/** session_species rows, memoised per request (DB path + $since) so Home runs the query once. */
+function v2_session_rows(DateTimeImmutable $since): array
+{
+    $params = v2_session_params($since);
+    $key = v2_db_path() . '|' . implode(' ', $params);
+    $memo = &v2_session_memo();
+    if (!array_key_exists($key, $memo)) {
+        $memo = [$key => v2_q('session_species', $params)];
+    }
+    return $memo[$key];
+}
+
+/** The one-entry memo behind v2_session_rows(). Clear it with `$m = &v2_session_memo(); $m = [];` (benchmarks). */
+function &v2_session_memo(): array
+{
+    static $memo = [];
+    return $memo;
+}
+
 /** @return array{detections:int, species:int, last:?DateTimeImmutable} */
 function v2_session_summary(DateTimeImmutable $since): array
 {
-    $rows = v2_q('session_species', v2_session_params($since));
-    $last = $rows === [] ? null : max(array_column($rows, 'last'));
+    $rows = v2_session_rows($since);
     return [
         'detections' => array_sum(array_map('intval', array_column($rows, 'n'))),
         'species' => count($rows),
-        'last' => $last === null ? null : v2_dt($last),
+        'last' => $rows === [] ? null : v2_dt($rows[0]['last']), // rows are newest first
     ];
 }
 
 /**
  * One row per species heard since $since, newest first, with the clip and confidence of its
- * latest detection, the confidence range and whether the species is new (first seen in the session).
+ * latest detection, the confidence range and whether the species is new (first heard in the
+ * session, from the species cache's first-heard time). No per-species queries.
  * @return list<array{sci:string, n:int, last:DateTimeImmutable, clip:array, conf:float,
  *   conf_min:float, conf_max:float, is_new:bool, names:array}>
  */
 function v2_session_species(DateTimeImmutable $since): array
 {
-    $rows = v2_q('session_species', v2_session_params($since));
+    $rows = v2_session_rows($since);
     if ($rows === []) {
         return [];
     }
-    $lastRow = v2_stmt('last_row');
-    $firstSeen = v2_stmt('first_seen');
+    $known = v2_species_index();
     $sinceStr = $since->setTimezone(new DateTimeZone(v2_tz()))->format('Y-m-d H:i:s');
     $out = [];
     foreach ($rows as $r) {
         $sci = $r['Sci_Name'];
-        $lr = $lastRow([':s' => $sci])[0];
-        $first = $firstSeen([':s' => $sci])[0]['first'];
+        $first = $known[$sci]['first'] ?? $r['last'];
         $out[] = [
             'sci' => $sci,
             'n' => (int) $r['n'],
             'last' => v2_dt($r['last']),
-            'clip' => v2_clip($lr),
-            'conf' => (float) $lr['Confidence'],
+            'clip' => v2_clip($r),
+            'conf' => (float) $r['Confidence'],
             'conf_min' => (float) $r['cmin'],
             'conf_max' => (float) $r['cmax'],
             'is_new' => $first >= $sinceStr,
-            'names' => v2_names($sci, $lr['Com_Name']),
+            'names' => v2_names($sci, $r['Com_Name']),
         ];
     }
     return $out;
@@ -411,42 +456,101 @@ function v2_day_keys(int $days): array
     return $keys;
 }
 
+/** Key of the species cache entry (one file, updated in place). */
+const V2_SPECIES_CACHE = 'species-all';
+
+/** A species cache entry older than this is rebuilt from scratch (drops deleted rows). */
+const V2_SPECIES_REBUILD_S = 3600;
+
 /**
- * Every species ever heard: totals, first/last ('Y-m-d H:i:s'), detections per day for the last
- * 30 days (oldest first, today last), names and is_new (first heard this session). Cached per
- * DB version and day (d30 depends on today); is_new is added after the cache read.
+ * Per-species totals keyed by Sci_Name: n, first/last ('Y-m-d H:i:s'), d30 (detections per day
+ * for the last 30 days, oldest first, today last) and names. Kept in one cache entry with the
+ * DB path, the max rowid it covers, its day and build time:
+ * - other day, older than V2_SPECIES_REBUILD_S, or MAX(rowid) went down → full rebuild;
+ * - MAX(rowid) went up → only rows in (cached max, MAX(rowid)] are aggregated and merged in;
+ * - otherwise a plain hit. Each request costs one O(1) MAX(rowid) query plus the file read.
+ * Deleted rows stay counted until the next full rebuild.
+ * @return array<string, array{sci:string, n:int, first:string, last:string, d30:list<int>, names:array}>
+ */
+function v2_species_index(): array
+{
+    $max = (int) v2_db_key();
+    $today = v2_now()->format('Y-m-d');
+    $hit = v2_cache_read(V2_SPECIES_CACHE, 0);
+    $e = is_array($hit[0] ?? null) ? $hit[0] : null;
+    $fresh = $e !== null && ($e['day'] ?? '') === $today && ($e['db'] ?? '') === v2_db_path() && is_array($e['rows'] ?? null)
+        && time() - (int) ($e['built'] ?? 0) < V2_SPECIES_REBUILD_S && (int) ($e['max'] ?? -1) <= $max;
+    if (!$fresh) {
+        $e = ['db' => v2_db_path(), 'day' => $today, 'built' => time(), 'max' => $max, 'rows' => v2_species_build($max)];
+        return v2_cache_write(V2_SPECIES_CACHE, $e)['rows'];
+    }
+    if ((int) $e['max'] < $max) {
+        $e['rows'] = v2_species_merge($e['rows'], (int) $e['max'], $max);
+        $e['max'] = $max;
+        $e = v2_cache_write(V2_SPECIES_CACHE, $e);
+    }
+    return $e['rows'];
+}
+
+/** Full aggregate of rows up to rowid $max. */
+function v2_species_build(int $max): array
+{
+    $days = v2_day_keys(30);
+    $d30 = [];
+    foreach (v2_q('species_d30', [':from' => array_key_first($days), ':m' => $max]) as $r) {
+        if (isset($days[$r['Date']])) {
+            $d30[$r['Sci_Name']][$r['Date']] = (int) $r['n'];
+        }
+    }
+    $out = [];
+    foreach (v2_q('species_all', [':m' => $max]) as $r) {
+        $sci = $r['Sci_Name'];
+        $out[$sci] = [
+            'sci' => $sci,
+            'n' => (int) $r['n'],
+            'first' => $r['first'],
+            'last' => $r['last'],
+            'd30' => array_values(array_replace($days, $d30[$sci] ?? [])),
+            'names' => v2_names($sci),
+        ];
+    }
+    return $out;
+}
+
+/** Adds the rows with rowid in ($after, $max] to cached $rows (same day as the cache). */
+function v2_species_merge(array $rows, int $after, int $max): array
+{
+    $pos = array_flip(array_keys(v2_day_keys(30)));
+    foreach (v2_q('species_since', [':after' => $after, ':m' => $max]) as $r) {
+        $sci = $r['Sci_Name'];
+        $first = $r['Date'] . ' ' . $r['tmin'];
+        $last = $r['Date'] . ' ' . $r['tmax'];
+        $n = (int) $r['n'];
+        if (!isset($rows[$sci])) {
+            $rows[$sci] = ['sci' => $sci, 'n' => 0, 'first' => $first, 'last' => $last,
+                'd30' => array_fill(0, 30, 0), 'names' => v2_names($sci)];
+        }
+        $s = &$rows[$sci];
+        $s['n'] += $n;
+        $s['first'] = min($s['first'], $first);
+        $s['last'] = max($s['last'], $last);
+        if (isset($pos[$r['Date']])) {
+            $s['d30'][$pos[$r['Date']]] += $n;
+        }
+        unset($s);
+    }
+    return $rows;
+}
+
+/**
+ * Every species ever heard (v2_species_index() rows, no clip) plus is_new: first heard in this
+ * session. is_new is added after the cache read, so the cache does not depend on the session.
  * @return list<array{sci:string, n:int, first:string, last:string, d30:list<int>, names:array, is_new:bool}>
  */
 function v2_species_all(): array
 {
-    $today = v2_now()->format('Y-m-d');
-    $key = 'species-' . str_replace(':', '-', v2_db_key()) . '-' . $today;
-    $rows = v2_cache($key, 0, function () {
-        $days = v2_day_keys(30);
-        $d30 = [];
-        foreach (v2_q('species_d30', [':from' => array_key_first($days)]) as $r) {
-            if (isset($days[$r['Date']])) {
-                $d30[$r['Sci_Name']][$r['Date']] = (int) $r['n'];
-            }
-        }
-        $out = [];
-        foreach (v2_q('species_all') as $r) {
-            $sci = $r['Sci_Name'];
-            $out[] = [
-                'sci' => $sci,
-                'n' => (int) $r['n'],
-                'first' => $r['first'],
-                'last' => $r['last'],
-                'd30' => array_values(array_replace($days, $d30[$sci] ?? [])),
-                'names' => v2_names($sci),
-            ];
-        }
-        foreach (glob(v2_cache_dir() . '/species-*.json') ?: [] as $old) {
-            @unlink($old); // older DB versions / days; v2_cache writes the new one next
-        }
-        return $out;
-    });
     $start = v2_session_start()->setTimezone(new DateTimeZone(v2_tz()))->format('Y-m-d H:i:s');
+    $rows = array_values(v2_species_index());
     foreach ($rows as &$r) {
         $r['is_new'] = $r['first'] >= $start;
     }
