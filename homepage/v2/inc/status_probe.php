@@ -152,14 +152,22 @@ const V2_UNITS = ['birdnet_recording' => 'Opname', 'birdnet_analysis' => 'Analys
 /**
  * Everything the Status page shows, cached 30 s. Five commands at most per refresh:
  * vcgencmd, systemctl show, systemctl is-active (all units at once), nmcli and hostname.
+ * A build that met a busy database ("database bezig") is not cached: the next refresh retries.
  * @return array{generated:int, uptime_s:int, power:array, groups:list<array{title:string, items:list<array>}>}
  */
 function v2_status(): array
 {
-    return v2_cache('status', 30, 'v2_status_build');
+    $hit = v2_cache_read('status', 30);
+    if ($hit !== null && is_array($hit[0])) {
+        return $hit[0];
+    }
+    $busy = false;
+    $built = v2_status_build($busy);
+    return $busy ? $built : v2_cache_write('status', $built);
 }
 
-function v2_status_build(): array
+/** @param bool $busy set when the database was busy (V2DbBusy) */
+function v2_status_build(bool &$busy = false): array
 {
     $now = v2_now();
     $conf = v2_conf();
@@ -182,7 +190,7 @@ function v2_status_build(): array
         'uptime_s' => $uptime_s,
         'power' => $power,
         'groups' => [
-            ['title' => 'Luisteren', 'items' => v2_listen_items($now, $recs, $units)],
+            ['title' => 'Luisteren', 'items' => v2_listen_items($now, $recs, $units, $busy)],
             ['title' => 'Pi', 'items' => v2_pi_items($recs, (int) ($conf['PURGE_THRESHOLD'] ?? 95) ?: 95, $uptime === null ? null : $uptime_s)],
             ['title' => 'Netwerk', 'items' => v2_net_items()],
             ['title' => 'Services', 'items' => array_map(
@@ -198,7 +206,7 @@ function v2_status_build(): array
     ];
 }
 
-function v2_listen_items(DateTimeImmutable $now, string $recs, array $units): array
+function v2_listen_items(DateTimeImmutable $now, string $recs, array $units, bool &$busy = false): array
 {
     $items = [];
 
@@ -245,7 +253,8 @@ function v2_listen_items(DateTimeImmutable $now, string $recs, array $units): ar
         $items[] = v2_item(null, 'Totaal (alle tijd)', v2_fmt_int($n) . ' detecties · ' . v2_fmt_int(count($all)) . ' soorten');
     } catch (Throwable $e) {
         error_log('v2 status: ' . $e->getMessage());
-        $value = $e instanceof V2DbBusy ? 'database bezig' : 'onbekend';
+        $busy = $e instanceof V2DbBusy;
+        $value = $busy ? 'database bezig' : 'onbekend';
         $items = array_slice($items, 0, 4);
         $items[] = v2_item('unknown', 'Laatste detectie', $value);
         $items[] = v2_item('unknown', 'Totaal (alle tijd)', $value);
