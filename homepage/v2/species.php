@@ -77,14 +77,9 @@ v2_guard(function (): void {
             v2_error_page(404, 'Soort niet gevonden', 'Deze soort is hier nog niet gehoord.');
         }
         $since = v2_session_start();
-        $sessionN = 0;
-        foreach (v2_session_species($since) as $s) {
-            if ($s['sci'] === $sci) {
-                $sessionN = $s['n'];
-            }
-        }
         $sinceStr = $since->setTimezone(new DateTimeZone(v2_tz()))->format('Y-m-d H:i:s');
         $hours = v2_session_hours($since, $sci);
+        $sessionN = array_sum($hours); // the same session rows, so no separate count query
         $days = v2_species_days($sci, 30);
         $recs = v2_species_recordings($sci, $page, 20);
     }

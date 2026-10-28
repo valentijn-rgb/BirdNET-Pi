@@ -47,7 +47,6 @@ const V2_SQL = [
     'species_d30' => 'SELECT Sci_Name, Date, COUNT(*) AS n FROM detections WHERE Date >= :from AND +rowid <= :m GROUP BY +Sci_Name, Date',
     'species_since' => 'SELECT Sci_Name, Date, COUNT(*) AS n, MIN(Time) AS tmin, MAX(Time) AS tmax
         FROM detections WHERE rowid > :after AND rowid <= :m GROUP BY +Sci_Name, Date',
-    'species_detail' => "SELECT COUNT(*) AS n, MIN(Date||' '||Time) AS first, MAX(Date||' '||Time) AS last FROM detections WHERE Sci_Name = :s",
     'species_days' => 'SELECT Date, COUNT(*) AS n FROM detections WHERE Sci_Name = :s AND Date >= :from GROUP BY Date',
     'species_recordings' => 'SELECT Date, Time, Com_Name, Confidence, File_Name FROM detections WHERE Sci_Name = :s
         ORDER BY Date DESC, Time DESC LIMIT :lim OFFSET :off',
@@ -656,14 +655,18 @@ function v2_species_sort(array $rows, string $sort, string $dir): array
     return array_map(static fn ($i) => $rows[$i], $idx);
 }
 
-/** @return ?array{sci:string, n:int, first:string, last:string, names:array} null when never heard */
+/**
+ * Totals of one species from the species cache (no query of its own; like the Soorten list,
+ * deleted rows count until the cache's next full rebuild).
+ * @return ?array{sci:string, n:int, first:string, last:string, names:array} null when never heard
+ */
 function v2_species_detail(string $sci): ?array
 {
-    $r = v2_q('species_detail', [':s' => $sci])[0] ?? null;
+    $r = v2_species_index()[$sci] ?? null;
     if ($r === null || (int) $r['n'] === 0) {
         return null;
     }
-    return ['sci' => $sci, 'n' => (int) $r['n'], 'first' => $r['first'], 'last' => $r['last'], 'names' => v2_names($sci)];
+    return ['sci' => $sci, 'n' => (int) $r['n'], 'first' => $r['first'], 'last' => $r['last'], 'names' => $r['names']];
 }
 
 /** Detections per day for the last $days days ending today, oldest first, zero-filled. */
