@@ -1,0 +1,15 @@
+{
+  "name": "Vogels",
+  "short_name": "Vogels",
+  "lang": "nl",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#EEF2EA",
+  "theme_color": "#2F5E2B",
+  "icons": [
+    { "src": "/v2/icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/v2/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/v2/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
