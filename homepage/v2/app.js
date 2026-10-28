@@ -5,15 +5,23 @@
 
   // A photo that fails to load becomes an initial-letter placeholder.
   function initPhotoFallback() {
-    document.addEventListener('error', function (e) {
-      var img = e.target;
-      if (!img || img.tagName !== 'IMG' || !img.classList.contains('photo')) return;
+    function swap(img) {
       var span = document.createElement('span');
       span.className = img.className + ' placeholder';
       span.setAttribute('aria-hidden', 'true');
       span.textContent = img.getAttribute('data-initial') || '';
       img.replaceWith(span);
+    }
+    document.addEventListener('error', function (e) {
+      var img = e.target;
+      if (img && img.tagName === 'IMG' && img.classList.contains('photo')) swap(img);
     }, true);
+    // This script is deferred: a photo that failed while the page was parsing (offline, eager
+    // hero) fired its error before the listener existed.
+    var imgs = document.querySelectorAll('img.photo');
+    for (var i = 0; i < imgs.length; i++) {
+      if (imgs[i].complete && imgs[i].naturalWidth === 0) swap(imgs[i]);
+    }
   }
 
   // One shared <audio id="player">: a .play button toggles its clip; starting one resets any other.
