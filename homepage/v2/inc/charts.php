@@ -28,10 +28,45 @@ function v2_bars_svg(array $values, string $ariaLabel, int $height = 40, string 
         . h($ariaLabel) . '">' . $rects . '</svg>';
 }
 
-/** 30-day sparkline for the species table: the same bars at 24 px height. */
+/**
+ * 30-day sparkline for the species table: the same bars as v2_bars_svg() at 24 units high, but
+ * drawn as one path (plus one for the zero-day stubs) instead of a rect per day, since the table
+ * repeats it on every row.
+ */
 function v2_spark_svg(array $values, string $ariaLabel): string
 {
-    return v2_bars_svg($values, $ariaLabel, 24, 'bars spark');
+    $values = array_values(array_map('intval', $values));
+    $max = max([1, ...$values]);
+    // Each bar is a vertical stroke 8 units wide (butt caps: the same rectangle as a rect) from
+    // the baseline up; a relative move steps from its top to the next bar's foot.
+    $d = ['bar' => '', 'bar-empty' => ''];
+    $pen = ['bar' => null, 'bar-empty' => null]; // [x, y] after the last segment
+    foreach ($values as $i => $v) {
+        $x = $i * 10 + 5;
+        $k = $v <= 0 ? 'bar-empty' : 'bar';
+        $h = $v <= 0 ? 2 : max(2, (int) round($v / $max * 24));
+        $d[$k] .= ($pen[$k] === null ? "M{$x} 24" : 'm' . ($x - $pen[$k][0]) . ' ' . (24 - $pen[$k][1])) . "v-{$h}";
+        $pen[$k] = [$x, 24 - $h];
+    }
+    $out = '';
+    foreach ($d as $class => $path) {
+        if ($path !== '') {
+            $out .= '<path class="' . $class . '" stroke-width="8" d="' . $path . '"/>';
+        }
+    }
+    return '<svg class="bars spark" viewBox="0 0 ' . (10 * count($values)) . ' 24" preserveAspectRatio="none" role="img" aria-label="'
+        . h($ariaLabel) . '">' . $out . '</svg>';
+}
+
+/** Short spoken label of a sparkline: "30 dagen: 812 detecties", "… 1 detectie", "… geen detecties". */
+function v2_spark_aria(array $values): string
+{
+    $n = array_sum(array_map('intval', $values));
+    return count($values) . ' dagen: ' . match ($n) {
+        0 => 'geen detecties',
+        1 => '1 detectie',
+        default => v2_fmt_int($n) . ' detecties',
+    };
 }
 
 /** "5 in het uur van 13:00, 8 in het uur van 14:00, geen in andere uren"; "Nog geen detecties" when all zero. */

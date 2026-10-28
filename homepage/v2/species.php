@@ -22,6 +22,9 @@ const V2_SORT_NONE = ['M8 9l4-4 4 4', 'M16 15l-4 4-4-4'];
 const V2_SORT_ASC = ['M12 19V5', 'M5 12l7-7 7 7'];
 const V2_SORT_DESC = ['M12 5v14', 'M19 12l-7 7-7-7'];
 
+/** Species rows per list page (?spage=; ?page= pages the recordings of the open species). */
+const V2_SPECIES_PER_PAGE = 50;
+
 /** Highest recordings page accepted in ?page= (a larger value would overflow the OFFSET). */
 const V2_MAX_PAGE = 100000;
 
@@ -69,6 +72,9 @@ v2_guard(function (): void {
 
     $all = v2_species_all();
     $rows = v2_species_sort($all, $sort, $dir);
+    $spages = max(1, (int) ceil(count($rows) / V2_SPECIES_PER_PAGE));
+    $spage = min($spages, max(1, is_string($_GET['spage'] ?? null) ? (int) $_GET['spage'] : 1));
+    $shown = array_slice($rows, ($spage - 1) * V2_SPECIES_PER_PAGE, V2_SPECIES_PER_PAGE);
 
     $detail = null;
     if ($sci !== null) {
@@ -84,7 +90,8 @@ v2_guard(function (): void {
         $recs = v2_species_recordings($sci, $page, 20);
     }
 
-    $base = ['sort' => $sort, 'dir' => $dir];
+    // Sort and list page, kept by row links, the back link and the recordings pager.
+    $base = ['sort' => $sort, 'dir' => $dir, 'spage' => $spage > 1 ? $spage : null];
     v2_page_start($detail ? $detail['names']['nl'] : 'Soorten', 'species', $detail ? $from : '');
     $total = array_sum(array_column($all, 'n'));
     $headTag = $detail ? 'h2' : 'h1'; // one h1 per page: the species name when the detail is open
@@ -125,16 +132,14 @@ v2_guard(function (): void {
 </tr></thead>
 <tbody>
 <?php
-$dayKeys30 = array_keys(v2_day_keys(30));
-foreach ($rows as $r) {
+foreach ($shown as $r) {
     $nl = $r['names']['nl'];
     $last = v2_when_str($r['last'], $now);
     $href = v2_species_url($base + ['sci' => $r['sci']], '#detail');
-    $d30 = array_combine($dayKeys30, $r['d30']);
     ?>
 <tr class="row"<?= $r['sci'] === $sci ? ' aria-current="true"' : '' ?>>
 <td class="sp"><a href="<?= h($href) ?>"><?= v2_photo($r['sci'], $nl) ?><span class="row-text"><span class="row-head"><span class="row-name row-title"><?= h($nl) ?></span><?php if ($r['is_new']) { ?><span class="chip">Nieuw</span><?php } ?></span><span class="row-sub"><?= h(v2_fmt_int($r['n'])) ?>× totaal · laatst <?= h($last) ?></span></span></a></td>
-<td class="col-d30"><?= v2_spark_svg($r['d30'], 'Laatste 30 dagen: ' . lcfirst(v2_days_aria($d30))) ?></td>
+<td class="col-d30"><?= v2_spark_svg($r['d30'], v2_spark_aria($r['d30'])) ?></td>
 <td class="col-first"><?= h(v2_when_str($r['first'], $now)) ?></td>
 <td class="col-last"><?= h($last) ?></td>
 <td class="col-total"><?= h(v2_fmt_int($r['n'])) ?></td>
@@ -143,6 +148,17 @@ foreach ($rows as $r) {
 </tbody>
 </table>
 </div>
+<?php if ($spages > 1) {
+    $sfrom = ($spage - 1) * V2_SPECIES_PER_PAGE + 1;
+    // List paging keeps the open species and where it was opened from, not its recordings page.
+    $keep = ['sort' => $sort, 'dir' => $dir, 'sci' => $sci] + $origin;
+    ?>
+<p class="small muted"><?= h(v2_fmt_int($sfrom) . '–' . v2_fmt_int($sfrom + count($shown) - 1)) ?> van <?= h(v2_fmt_int(count($rows))) ?> soorten</p>
+<div class="pager">
+<?php if ($spage > 1) { ?><a class="link" href="<?= h(v2_species_url($keep + ['spage' => $spage > 2 ? $spage - 1 : null])) ?>">Vorige soorten</a><?php } ?>
+<?php if ($spage < $spages) { ?><a class="link more" href="<?= h(v2_species_url($keep + ['spage' => $spage + 1])) ?>">Meer soorten</a><?php } ?>
+</div>
+<?php } ?>
 <?php } ?>
 </section>
 <?php if ($detail) {
@@ -201,7 +217,7 @@ foreach ($rows as $r) {
 </div>
 <?php if (!$purged) { ?>
 <details>
-<summary><?= v2_icon(V2_CHEVRON, 18, 2) ?>Spectrogram</summary>
+<summary><?= v2_icon_ref('chevron', V2_CHEVRON, 18, 2) ?>Spectrogram</summary>
 <div class="spectro"><img loading="lazy" src="<?= h($rec['clip']['png']) ?>" alt="Spectrogram van de opname van <?= h($time) ?>"></div>
 </details>
 <?php } ?>

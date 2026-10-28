@@ -25,6 +25,32 @@ function v2_icon(string|array $d, int $size = 24, float $stroke = 1.8): string
         . $stroke . '" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' . $paths . '</svg>';
 }
 
+/**
+ * An icon repeated down a list: the first call per request defines <symbol id="i-$id"> (24×24
+ * viewBox) with $inner, every call draws it with <use>. $attrs go on the outer <svg>.
+ */
+function v2_svg_ref(string $id, string $attrs, string $inner): string
+{
+    static $defined = [];
+    $use = '<use href="#i-' . h($id) . '"/>';
+    if (isset($defined[$id])) {
+        return '<svg ' . $attrs . '>' . $use . '</svg>';
+    }
+    $defined[$id] = true;
+    return '<svg ' . $attrs . '><symbol id="i-' . h($id) . '" viewBox="0 0 24 24">' . $inner . '</symbol>' . $use . '</svg>';
+}
+
+/** v2_icon() as a shared symbol (see v2_svg_ref), for icons repeated on every row. */
+function v2_icon_ref(string $id, string|array $d, int $size = 24, float $stroke = 1.8): string
+{
+    $paths = '';
+    foreach ((array) $d as $p) {
+        $paths .= '<path d="' . h($p) . '"/>';
+    }
+    return v2_svg_ref($id, 'width="' . $size . '" height="' . $size . '" aria-hidden="true"', '<g fill="none" stroke="currentColor" stroke-width="'
+        . $stroke . '" stroke-linecap="round" stroke-linejoin="round">' . $paths . '</g>');
+}
+
 function v2_asset(string $file): string
 {
     return '/v2/' . $file . '?v=' . (@filemtime(dirname(__DIR__) . '/' . $file) ?: 0);
@@ -156,8 +182,8 @@ function v2_play_button(array $clip, string $label): string
             . h($label) . '"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg></button>';
     }
     return '<button type="button" class="play purged" disabled aria-label="Clip verwijderd, niet af te spelen">'
-        . '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">'
-        . '<path d="M4 4l16 16M8 5v6M8 15v4l6-3.8"/></svg><span class="purged-word">verwijderd</span></button>';
+        . v2_svg_ref('purged', 'width="18" height="18" aria-hidden="true"', '<path d="M4 4l16 16M8 5v6M8 15v4l6-3.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>')
+        . '<span class="purged-word">verwijderd</span></button>';
 }
 
 /** Species photo via photo.php; app.js swaps it for an initial-letter placeholder on error. */

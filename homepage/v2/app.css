@@ -203,6 +203,9 @@ table.species tr[aria-current] { background: var(--sel); }
 .hours .bars { height: 72px; }
 .days .bars { height: 56px; }
 .bars.spark { width: 120px; height: 24px; }
+.bars.spark path { fill: none; }
+.spark .bar { stroke: var(--bar); }
+.spark .bar-empty { stroke: var(--bar-empty); }
 .recs { display: flex; flex-direction: column; gap: 8px; }
 .recs h3 { margin-top: 4px; }
 .rec { padding: 0 12px; }
