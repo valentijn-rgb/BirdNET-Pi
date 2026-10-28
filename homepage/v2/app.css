@@ -275,3 +275,48 @@ li.rec .play.purged { width: 44px; height: 44px; min-height: 44px; border-radius
   .session-detail h1 { font-size: var(--f20); }
   .session-detail .home-list > h2 { font-size: var(--f15); }
 }
+
+/* Status */
+body:has(.status-page) main, body:has(.status-page) .topnav-in { max-width: 1200px; }
+.status-page, .status-groups, .log-panel, .log-head { display: flex; flex-direction: column; gap: 14px; }
+.status-head { flex-direction: row; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pill { min-height: 44px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--bar-empty); background: var(--surface); color: var(--text); display: inline-flex; align-items: center; gap: 6px; text-decoration: none; cursor: pointer; }
+.pill:hover { color: var(--text); background: var(--chip); }
+.pill[aria-pressed=true] { border-color: var(--accent-strong); background: var(--chip); color: var(--chip-text); font-weight: 600; }
+.power { background: var(--surface); border: 2px solid var(--accent); border-radius: var(--radius); padding: 14px; display: flex; align-items: center; gap: 12px; }
+.power > svg { color: var(--accent); }
+.power[data-state=warn], .power[data-state=error] { border-color: var(--warn); }
+.power[data-state=warn] > svg, .power[data-state=error] > svg { color: var(--warn); }
+.power[data-state=unknown] { border-style: dashed; border-color: var(--bar-empty); }
+.power[data-state=unknown] > svg { color: var(--muted); }
+.power-title { font-size: var(--f20); font-weight: 700; line-height: 1.25; }
+.status-group { display: flex; flex-direction: column; gap: 6px; }
+.status-group h2, .log-head h2 { margin: 0 4px; font-size: var(--f13); font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.si { padding: 10px 14px; }
+.si + .si { border-top: 1px solid var(--line); }
+.si-main { display: flex; align-items: flex-start; gap: 12px; }
+.si-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.si-label { font-size: var(--f13); color: var(--muted); }
+.si-value { overflow-wrap: anywhere; }
+.state { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: var(--f13); font-weight: 600; color: var(--ok); }
+.state-warn { color: var(--warn); }
+.state-error { color: var(--err); }
+.state-unknown { color: var(--muted); }
+.meter { display: block; margin-top: 6px; height: 8px; border-radius: 4px; background: var(--line); outline: 1px solid var(--bar-empty); outline-offset: -1px; overflow: hidden; }
+.meter > span { display: block; height: 100%; background: var(--bar); }
+.log-panel, .log-head { gap: 8px; }
+.log-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+#log { display: block; width: 100%; height: 260px; border: 0; border-radius: var(--radius); background: #17201A; }
+.log-down { border: 2px dashed var(--bar-empty); border-radius: var(--radius); padding: 10px 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.log-down > svg { color: var(--warn); }
+.log-down > span { flex: 1; min-width: 160px; display: flex; flex-direction: column; }
+#log[hidden], .log-down[hidden], html:not(.js) #logpause { display: none; }
+@media (min-width: 900px) {
+  .status-page { gap: 20px; }
+  .status-head p { font-size: var(--f15); }
+  .power { padding: 16px 18px; gap: 14px; }
+  .power > svg { width: 40px; height: 40px; }
+  .status-groups { display: block; columns: 3 300px; column-gap: 16px; }
+  .status-group { break-inside: avoid; margin-bottom: 16px; }
+  .log-head { flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+}
