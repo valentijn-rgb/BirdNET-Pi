@@ -441,7 +441,7 @@ function v2_window_data(array $params): array
     [$n, $m] = $reg !== null ? [$reg['n'], $reg['m']] : v2_window_fp($params);
     $id = substr(md5(v2_db_path() . '|' . implode(' ', $params)), 0, 16);
     $key = "window-$id-$n-$m";
-    $valid = static fn ($v) => is_array($v) && is_array($v['rows'] ?? null) && is_array($v['hours'] ?? null);
+    $valid = static fn ($v) => is_array($v) && is_array($v['rows'] ?? null) && is_array($v['hours'] ?? null) && is_array($v['first'] ?? null);
     $hit = v2_cache_read($key, 0);
     if ($hit !== null && $valid($hit[0])) {
         return $hit[0];
@@ -455,7 +455,8 @@ function v2_window_data(array $params): array
             return v2_cache_write($key, $saved);
         }
     }
-    $data = v2_cache_write($key, ['rows' => v2_window_rows($params), 'hours' => v2_q('window_hours', $params)]);
+    $rows = v2_window_rows($params);
+    $data = v2_cache_write($key, ['rows' => $rows, 'hours' => v2_q('window_hours', $params), 'first' => v2_first_heard(array_column($rows, 'Sci_Name'))]);
     if ($reg !== null) {
         v2_session_state_write($reg['id'], "$n-$m", ['window' => $data]);
     }
@@ -511,6 +512,28 @@ function v2_session_state_write(string $id, string $fp, array $part): void
     }
 }
 
+/**
+ * When each species was first heard (all time, 'Y-m-d H:i:s'), by one index probe per species:
+ * the "Nieuw" marks of a finished session, stored with its window data so its detail does not
+ * need the full species cache.
+ * @return array<string, string>
+ */
+function v2_first_heard(array $scis): array
+{
+    if ($scis === []) {
+        return [];
+    }
+    $probe = v2_stmt('first_seen');
+    $out = [];
+    foreach ($scis as $sci) {
+        $first = $probe([':s' => $sci])[0]['first'] ?? null;
+        if ($first !== null) {
+            $out[$sci] = $first;
+        }
+    }
+    return $out;
+}
+
 /** window_species plus, per species, the clip columns of its newest detection inside the window. */
 function v2_window_rows(array $params): array
 {
@@ -554,7 +577,10 @@ function v2_session_summary(DateTimeImmutable $since, ?DateTimeImmutable $until 
  * latest detection, the confidence range and whether the species is new (first heard in the
  * session, from the species cache's first-heard time). No per-species queries.
  * With $until it covers the finished session [$since, $until): one window_last_row lookup per
- * species gives the newest clip inside the window, and is_new means first heard in the window.
+ * species gives the newest clip inside the window, and is_new means first heard in the window,
+ * from first-heard times stored with the window data when it was built (v2_first_heard): a
+ * deletion of a species' older rows outside the window does not change them until the window
+ * data is rebuilt.
  * @return list<array{sci:string, n:int, last:DateTimeImmutable, clip:array, conf:float,
  *   conf_min:float, conf_max:float, is_new:bool, names:array}>
  */
@@ -564,14 +590,17 @@ function v2_session_species(DateTimeImmutable $since, ?DateTimeImmutable $until 
     if ($rows === []) {
         return [];
     }
-    $known = v2_species_index();
+    // A finished session takes its first-heard times from its (persisted) window data; the running
+    // one from the live species cache.
+    $firsts = $until === null ? array_map(static fn ($s) => $s['first'], v2_species_index())
+        : v2_window_data(v2_session_params($since, $until))['first'];
     $tz = new DateTimeZone(v2_tz());
     $sinceStr = $since->setTimezone($tz)->format('Y-m-d H:i:s');
     $untilStr = $until?->setTimezone($tz)->format('Y-m-d H:i:s');
     $out = [];
     foreach ($rows as $r) {
         $sci = $r['Sci_Name'];
-        $first = $known[$sci]['first'] ?? $r['last'];
+        $first = $firsts[$sci] ?? $r['last'];
         $out[] = [
             'sci' => $sci,
             'n' => (int) $r['n'],
