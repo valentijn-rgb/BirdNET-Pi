@@ -94,7 +94,12 @@ v2_guard(function (): void {
     $base = ['sort' => $sort, 'dir' => $dir, 'spage' => $spage > 1 ? $spage : null];
     v2_page_start($detail ? $detail['names']['nl'] : 'Soorten', 'species', $detail ? $from : '');
     $total = array_sum(array_column($all, 'n'));
+    $nSp = count($all);
+    $soorten = $nSp === 1 ? 'soort' : 'soorten';
+    $firstAll = $all ? v2_when_str(min(array_column($all, 'first')), $now) : '';
+    $lastAll = $all ? v2_when_str(max(array_column($all, 'last')), $now) : '';
     $headTag = $detail ? 'h2' : 'h1'; // one h1 per page: the species name when the detail is open
+    // Phone and desktop headings differ (as in the design); the other one is display: none.
     ?>
 <div class="species-page<?= $detail ? ' has-detail' : '' ?>">
 <section class="species-list" aria-labelledby="species-h">
@@ -102,8 +107,9 @@ v2_guard(function (): void {
 <?php if ($all === []) { ?>
 <<?= $headTag ?> id="species-h" class="page-title">Soorten</<?= $headTag ?>>
 <?php } else { ?>
-<<?= $headTag ?> id="species-h" class="page-title"><?= count($all) ?> <?= count($all) === 1 ? 'soort' : 'soorten' ?> gehoord</<?= $headTag ?>>
-<p class="summary muted">Alle tijd: <strong><?= h(v2_fmt_int($total)) ?>×</strong> gehoord · eerst <strong><?= h(v2_when_str(min(array_column($all, 'first')), $now)) ?></strong> · laatst <strong><?= h(v2_when_str(max(array_column($all, 'last')), $now)) ?></strong></p>
+<<?= $headTag ?> id="species-h" class="page-title"><span class="phone-only"><?= $nSp ?> <?= $soorten ?> gehoord</span><span class="wide-only">Soorten</span></<?= $headTag ?>>
+<p class="summary muted phone-only">Alle tijd: <strong><?= h(v2_fmt_int($total)) ?>×</strong> gehoord · eerst <strong><?= h($firstAll) ?></strong> · laatst <strong><?= h($lastAll) ?></strong></p>
+<p class="summary muted wide-only">Alle tijd: <strong><?= h(v2_fmt_int($total)) ?></strong> <?= $total === 1 ? 'detectie' : 'detecties' ?> · <strong><?= h(v2_fmt_int($nSp)) ?></strong> <?= $soorten ?> · eerst <?= h($firstAll) ?> · laatst <?= h($lastAll) ?></p>
 <?php } ?>
 </header>
 <?php if ($all === []) { ?>
@@ -120,6 +126,7 @@ v2_guard(function (): void {
 </form>
 <div class="table-wrap">
 <table class="species">
+<caption class="small muted">Klik op een kolomkop om te sorteren</caption>
 <thead><tr>
 <?php foreach (V2_SPECIES_COLS as $key => [$label, $def]) {
     $on = $key === $sort;
