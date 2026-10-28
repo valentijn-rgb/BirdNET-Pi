@@ -955,8 +955,12 @@ function v2_species_recordings(string $sci, int $page, int $per = 20): array
 // ---------------------------------------------------------------------------------------------
 // Boot history (Sessies): one session = one boot of the Pi, from the system journal.
 
-/** journald's "Journal stopped" entry (SD_MESSAGE_JOURNAL_STOP), logged on every clean shutdown. */
-const V2_JOURNAL_STOP = 'MESSAGE_ID=d93fb3c9c24d451a97cea615ce59c00b';
+/**
+ * Version of the rule behind persisted boot facts ("m" in boots.json). 2: only UNIT=shutdown.target
+ * marks a clean boot (journald also logs "Journal stopped" when it merely restarts, so rule 1's
+ * alternative marked power losses clean). Facts without it are resolved again once.
+ */
+const V2_BOOT_RULE = 2;
 
 /**
  * Runs `journalctl --no-pager -q <args>` (each argument shell-escaped, stderr dropped).
@@ -999,7 +1003,7 @@ function &v2_boots_state(): array
     return $state;
 }
 
-/** The persisted facts map: boot id => {start_us?, clean, first_us, last_us}. */
+/** The persisted facts map: boot id => {start_us?, clean, first_us, last_us, m}. */
 function v2_boot_map_read(): array
 {
     $raw = @file_get_contents(v2_state_dir() . '/boots.json');
@@ -1062,23 +1066,27 @@ function v2_boot_list(): array
 
 /**
  * Makes sure the finished boots $ids have facts, with as few journalctl calls as possible:
- * - one call for the clean-shutdown markers of *all* boots (UNIT=shutdown.target or journald's
- *   "Journal stopped"): a marked boot is clean, and its start is __REALTIME_TIMESTAMP −
+ * - one call for the clean-shutdown markers of *all* boots (UNIT=shutdown.target, logged once on a
+ *   clean shutdown or reboot): a marked boot is clean, and its start is __REALTIME_TIMESTAMP −
  *   __MONOTONIC_TIMESTAMP of that entry (right even after a stale boot clock, once it synced);
  *   an unmarked one lost power (clean = false);
  * - per unmarked boot in $ids, one `-b <id> -n 1` call for its start the same way.
  * Results of successful calls are persisted in the state dir; failures are retried next request.
+ * Persisted facts from an older rule (no "m" = V2_BOOT_RULE) count as missing; their start is kept.
  */
 function v2_boot_resolve(array $ids): void
 {
     $s = &v2_boots_state();
     $byId = array_column(v2_boot_list(), null, 'id');
     $changed = false;
-    $missing = array_filter($ids, fn ($id) => isset($byId[$id]) && $byId[$id]['journal'] && !$byId[$id]['current'] && !isset($s['facts'][$id]));
+    $known = function (string $id) use (&$s): bool {
+        return ($s['facts'][$id]['m'] ?? null) === V2_BOOT_RULE;
+    };
+    $missing = array_filter($ids, fn ($id) => isset($byId[$id]) && $byId[$id]['journal'] && !$byId[$id]['current'] && !$known($id));
     if ($missing !== [] && empty($s['markers_tried'])) {
         $s['markers_tried'] = true;
         $out = v2_journalctl(['-o', 'json', '--output-fields=_BOOT_ID,__REALTIME_TIMESTAMP,__MONOTONIC_TIMESTAMP',
-            'UNIT=shutdown.target', '+', V2_JOURNAL_STOP]);
+            'UNIT=shutdown.target']);
         if ($out !== null) {
             $marked = [];
             foreach (explode("\n", $out) as $line) {
@@ -1088,11 +1096,13 @@ function v2_boot_resolve(array $ids): void
                 }
             }
             foreach ($byId as $id => $b) {
-                if ($b['current'] || !$b['journal'] || isset($s['facts'][$id])) {
+                if ($b['current'] || !$b['journal'] || $known($id)) {
                     continue;
                 }
+                // Any entry gives the boot's start; an older rule's start is kept for an unmarked boot.
+                $start = $marked[$id] ?? $s['facts'][$id]['start_us'] ?? null;
                 $s['facts'][$id] = ['clean' => isset($marked[$id]), 'first_us' => $b['first_us'], 'last_us' => $b['last_us']]
-                    + (isset($marked[$id]) ? ['start_us' => $marked[$id]] : []);
+                    + ($start !== null ? ['start_us' => (int) $start] : []) + ['m' => V2_BOOT_RULE];
                 $changed = true;
             }
         }
@@ -1120,7 +1130,7 @@ function v2_boot_resolve(array $ids): void
         // Merge with what another request may have written meanwhile; ours wins per boot.
         $map = v2_boot_map_read();
         foreach ($s['facts'] as $id => $f) {
-            if (!isset($map[$id]['start_us']) || isset($f['start_us'])) {
+            if (!isset($map[$id]['start_us']) || isset($f['start_us']) || ($map[$id]['m'] ?? null) !== V2_BOOT_RULE) {
                 $map[$id] = $f;
             }
         }
