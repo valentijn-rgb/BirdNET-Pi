@@ -12,6 +12,7 @@ cat << EOF > /etc/caddy/Caddyfile
 http:// ${BIRDNETPI_URL} {
   root * ${EXTRACTED}
   file_server browse
+  rewrite / /v2/index.php
   handle /By_Date/* {
     file_server browse
   }
@@ -48,6 +49,7 @@ else
 http:// ${BIRDNETPI_URL} {
   root * ${EXTRACTED}
   file_server browse
+  rewrite / /v2/index.php
   handle /By_Date/* {
     file_server browse
   }

@@ -72,4 +72,11 @@ journal() {
 }
 step "journal" journal
 
+# 6. Serve v2 Home at /: a Caddyfile written before the rewrite was added to the generators is
+#    regenerated (and Caddy reloaded) once; later runs find the line and do nothing.
+caddy_root() {
+  grep -q 'rewrite / /v2/index.php' /etc/caddy/Caddyfile || /usr/local/bin/update_caddyfile.sh
+}
+step "caddy /" caddy_root
+
 exit $failed
