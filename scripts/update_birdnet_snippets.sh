@@ -278,6 +278,7 @@ sqlite3 $HOME/BirdNET-Pi/scripts/birds.db << EOF
 CREATE INDEX IF NOT EXISTS "detections_Sci_Name" ON "detections" ("Sci_Name");
 EOF
 
+"$my_dir/v2_install.sh"
 # update snippets above
 
 systemctl daemon-reload
