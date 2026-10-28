@@ -135,11 +135,13 @@ function v2_stmt(string $name): Closure
     } finally {
         $GLOBALS['v2_db_ms'] = ($GLOBALS['v2_db_ms'] ?? 0.0) + (hrtime(true) - $t0) / 1e6;
     }
-    return static fn (array $params = []): array => v2_stmt_run($db, $st, $params);
+    return static fn (array $params = []): array => v2_stmt_run($db, $st, $params, $name);
 }
 
-function v2_stmt_run(SQLite3 $db, SQLite3Stmt $st, array $params): array
+/** Runs a prepared statement; counts runs per query name in $GLOBALS['v2_q_runs'] (tests). */
+function v2_stmt_run(SQLite3 $db, SQLite3Stmt $st, array $params, string $name = ''): array
 {
+    $GLOBALS['v2_q_runs'][$name] = ($GLOBALS['v2_q_runs'][$name] ?? 0) + 1;
     $t0 = hrtime(true);
     $rows = [];
     try {
@@ -428,21 +430,85 @@ function v2_window_fp(array $params): array
  * A finished window's rows (v2_window_rows) and window_hours rows, cached in /dev/shm under its
  * fingerprint (ttl 0): a finished session only changes when rows inside it are added or deleted,
  * and that changes the key. Older entries of the same window are removed.
+ * For a boot's window (registered by v2_session_card) the data is also kept in the state dir,
+ * so after a reboot (empty /dev/shm) it is read back instead of queried again.
  * @return array{rows: list<array>, hours: list<array>}
  */
 function v2_window_data(array $params): array
 {
-    [$n, $m] = v2_window_fp($params);
+    // A boot's window registered by v2_session_card: its fingerprint is known and the data persists.
+    $reg = v2_boots_state()['windows'][implode(' ', $params)] ?? null;
+    [$n, $m] = $reg !== null ? [$reg['n'], $reg['m']] : v2_window_fp($params);
     $id = substr(md5(v2_db_path() . '|' . implode(' ', $params)), 0, 16);
     $key = "window-$id-$n-$m";
+    $valid = static fn ($v) => is_array($v) && is_array($v['rows'] ?? null) && is_array($v['hours'] ?? null);
     $hit = v2_cache_read($key, 0);
-    if ($hit !== null && is_array($hit[0]['rows'] ?? null) && is_array($hit[0]['hours'] ?? null)) {
+    if ($hit !== null && $valid($hit[0])) {
         return $hit[0];
     }
     foreach (glob(v2_cache_dir() . "/window-$id-*.json") ?: [] as $old) {
         @unlink($old);
     }
-    return v2_cache_write($key, ['rows' => v2_window_rows($params), 'hours' => v2_q('window_hours', $params)]);
+    if ($reg !== null) {
+        $saved = v2_session_state_read($reg['id'], "$n-$m")['window'] ?? null;
+        if ($valid($saved)) {
+            return v2_cache_write($key, $saved);
+        }
+    }
+    $data = v2_cache_write($key, ['rows' => v2_window_rows($params), 'hours' => v2_q('window_hours', $params)]);
+    if ($reg !== null) {
+        v2_session_state_write($reg['id'], "$n-$m", ['window' => $data]);
+    }
+    return $data;
+}
+
+/** Persisted data of a finished boot: <state dir>/sessions/<boot id>.json = {fp, card?, window?}. */
+function v2_session_state_file(string $id): string
+{
+    return v2_state_dir() . '/sessions/' . $id . '.json';
+}
+
+/** The boot's persisted entry when it was saved under fingerprint $fp ("count-maxrowid"), else []. */
+function v2_session_state_read(string $id, string $fp): array
+{
+    if (!preg_match('/^[0-9a-f]{32}$/', $id)) {
+        return [];
+    }
+    $raw = @file_get_contents(v2_session_state_file($id));
+    $e = $raw === false ? null : json_decode($raw, true);
+    return is_array($e) && ($e['fp'] ?? null) === $fp ? $e : [];
+}
+
+/**
+ * Merges $part (card and/or window) into the boot's entry under fingerprint $fp (an entry with
+ * another fingerprint is replaced), atomically (temp file + rename). Then drops the entries of
+ * boots no longer in the boot list. A failure is only logged: /dev/shm still has the data.
+ */
+function v2_session_state_write(string $id, string $fp, array $part): void
+{
+    $dir = v2_state_dir() . '/sessions';
+    if (!preg_match('/^[0-9a-f]{32}$/', $id) || (!is_dir($dir) && !@mkdir($dir, 0700) && !is_dir($dir))) {
+        error_log("v2: cannot write session state $dir/$id.json");
+        return;
+    }
+    $json = json_encode(['fp' => $fp] + $part + v2_session_state_read($id, $fp), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    $tmp = @tempnam($dir, '.s-');
+    if ($json === false || $tmp === false || @file_put_contents($tmp, $json) !== strlen($json) || !@rename($tmp, "$dir/$id.json")) {
+        if ($tmp !== false) {
+            @unlink($tmp);
+        }
+        error_log("v2: cannot write $dir/$id.json");
+        return;
+    }
+    $known = array_flip(array_column(v2_boot_list(), 'id'));
+    if ($known === []) {
+        return; // no boot list (journal unreadable): prune nothing
+    }
+    foreach (glob("$dir/*.json") ?: [] as $f) {
+        if (!isset($known[basename($f, '.json')])) {
+            @unlink($f);
+        }
+    }
 }
 
 /** window_species plus, per species, the clip columns of its newest detection inside the window. */
@@ -990,7 +1056,8 @@ function v2_boot_timeless(array $boot): bool
  * 3 species heard most (ties: newest first). A finished boot's card is built from window_species
  * alone and cached under the window's fingerprint (row count + max rowid inside it), so new
  * detections in the current session leave it alone and a deletion inside it rebuilds it; older
- * versions are removed. The current boot's card is not cached.
+ * versions are removed. It is also kept in the state dir (v2_session_state_write), which survives
+ * a reboot; /dev/shm stays the fast layer. The current boot's card is not cached.
  * @return array{detections:int, species:int, last:?string, top:list<array{sci:string, nl:string}>}
  */
 function v2_session_card(array $boot): array
@@ -1013,6 +1080,9 @@ function v2_session_card(array $boot): array
     }
     $params = v2_session_params($boot['start'], $boot['until']);
     [$n, $m] = v2_window_fp($params);
+    $s = &v2_boots_state();
+    $s['windows'][implode(' ', $params)] = ['id' => $boot['id'], 'n' => $n, 'm' => $m]; // for v2_window_data
+    unset($s);
     $key = 'session-' . $boot['id'] . '-' . $n . '-' . $m;
     $hit = v2_cache_read($key, 0);
     if ($hit !== null && is_array($hit[0])) {
@@ -1021,5 +1091,12 @@ function v2_session_card(array $boot): array
     foreach (glob(v2_cache_dir() . '/session-' . $boot['id'] . '-*.json') ?: [] as $old) {
         @unlink($old);
     }
-    return v2_cache_write($key, $card(v2_q('window_species', $params)));
+    // After a reboot /dev/shm is empty, but the state dir still has the card.
+    $saved = v2_session_state_read($boot['id'], "$n-$m")['card'] ?? null;
+    if (is_array($saved)) {
+        return v2_cache_write($key, $saved);
+    }
+    $built = v2_cache_write($key, $card(v2_q('window_species', $params)));
+    v2_session_state_write($boot['id'], "$n-$m", ['card' => $built]);
+    return $built;
 }
