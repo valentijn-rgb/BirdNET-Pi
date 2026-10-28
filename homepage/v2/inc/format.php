@@ -55,6 +55,21 @@ function v2_fmt_since(DateTimeImmutable $t, DateTimeImmutable $now): string
         . v2_fmt_duration($now->getTimestamp() - $t->getTimestamp());
 }
 
+/**
+ * A session's time span: "ma 26 okt 22:10 – 06:55" (end within 24 h), "wo 28 okt 13:00 – nu"
+ * (still running), "di 20 okt 22:00 – do 22 okt 08:00" (longer). In $a's timezone.
+ */
+function v2_fmt_span(DateTimeImmutable $a, ?DateTimeImmutable $b): string
+{
+    $start = v2_fmt_weekday($a) . ' ' . $a->format('H:i');
+    if ($b === null) {
+        return $start . ' – nu';
+    }
+    $b = $b->setTimezone($a->getTimezone());
+    $end = $b->getTimestamp() - $a->getTimestamp() < 86400 ? $b->format('H:i') : v2_fmt_weekday($b) . ' ' . $b->format('H:i');
+    return $start . ' – ' . $end;
+}
+
 /** "32 min", "1 u 3 min", "2 d 5 u" (whole minutes, rounded down). */
 function v2_fmt_duration(int $seconds): string
 {

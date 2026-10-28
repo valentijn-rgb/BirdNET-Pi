@@ -12,6 +12,9 @@ define('V2_DB_PATH', getenv('BIRDS_DB') ?: __DIR__ . '/birds.db');
  */
 const V2_SESSION_WHERE = 'Date >= :d AND (Date > :d OR Time >= :t)';
 
+/** A finished session: V2_SESSION_WHERE plus the exclusive upper bound :d2 :t2, i.e. [since, until). */
+const V2_WINDOW_WHERE = V2_SESSION_WHERE . ' AND Date <= :d2 AND (Date < :d2 OR Time < :t2)';
+
 /**
  * Named SQL used by v2_q(). Each one is checked by EXPLAIN QUERY PLAN in emulator/tests/php/ExplainTest.php.
  * - `GROUP BY +Sci_Name`: the unary + stops SQLite from walking the whole (Sci_Name, Date, Time)
@@ -49,6 +52,12 @@ const V2_SQL = [
     'species_recordings' => 'SELECT Date, Time, Com_Name, Confidence, File_Name FROM detections WHERE Sci_Name = :s
         ORDER BY Date DESC, Time DESC LIMIT :lim OFFSET :off',
     'last_detection' => 'SELECT Date, Time, Sci_Name, Com_Name FROM detections ORDER BY Date DESC, Time DESC LIMIT 1',
+    // A finished session (Sessies): the window's species, hours, and per species its newest clip inside the window.
+    'window_species' => "SELECT Sci_Name, COUNT(*) AS n, MAX(Date||' '||Time) AS last, MIN(Confidence) AS cmin, MAX(Confidence) AS cmax
+        FROM detections WHERE " . V2_WINDOW_WHERE . ' GROUP BY Sci_Name ORDER BY last DESC',
+    'window_hours' => 'SELECT substr(Time,1,2) AS h, COUNT(*) AS n FROM detections WHERE ' . V2_WINDOW_WHERE . ' GROUP BY h',
+    'window_last_row' => 'SELECT Date, Time, Com_Name, Confidence, File_Name FROM detections
+        WHERE Sci_Name = :s AND Date <= :d2 AND (Date < :d2 OR Time < :t2) ORDER BY Date DESC, Time DESC LIMIT 1',
 ];
 
 final class V2DbBusy extends RuntimeException {}
@@ -362,23 +371,52 @@ function v2_dt(string $s): DateTimeImmutable
     return new DateTimeImmutable($s, new DateTimeZone(v2_tz()));
 }
 
-/** Binds V2_SESSION_WHERE (:d, :t) for rows at or after $since (local time). */
-function v2_session_params(DateTimeImmutable $since): array
+/**
+ * Binds V2_SESSION_WHERE (:d, :t) for rows at or after $since (local time), plus :d2 :t2 for
+ * V2_WINDOW_WHERE (rows before $until) when $until is given.
+ */
+function v2_session_params(DateTimeImmutable $since, ?DateTimeImmutable $until = null): array
 {
-    $local = $since->setTimezone(new DateTimeZone(v2_tz()));
-    return [':d' => $local->format('Y-m-d'), ':t' => $local->format('H:i:s')];
+    $tz = new DateTimeZone(v2_tz());
+    $local = $since->setTimezone($tz);
+    $p = [':d' => $local->format('Y-m-d'), ':t' => $local->format('H:i:s')];
+    if ($until !== null) {
+        $end = $until->setTimezone($tz);
+        $p += [':d2' => $end->format('Y-m-d'), ':t2' => $end->format('H:i:s')];
+    }
+    return $p;
 }
 
-/** session_species rows, memoised per request (DB path + $since) so Home runs the query once. */
-function v2_session_rows(DateTimeImmutable $since): array
+/**
+ * session_species rows (or, with $until, window_species rows completed by window_last_row:
+ * the same keys), memoised per request (DB path + window) so a page runs the queries once.
+ */
+function v2_session_rows(DateTimeImmutable $since, ?DateTimeImmutable $until = null): array
 {
-    $params = v2_session_params($since);
+    $params = v2_session_params($since, $until);
     $key = v2_db_path() . '|' . implode(' ', $params);
     $memo = &v2_session_memo();
     if (!array_key_exists($key, $memo)) {
-        $memo = [$key => v2_q('session_species', $params)];
+        $memo = [$key => $until === null ? v2_q('session_species', $params) : v2_window_rows($params)];
     }
     return $memo[$key];
+}
+
+/** window_species plus, per species, the clip columns of its newest detection inside the window. */
+function v2_window_rows(array $params): array
+{
+    $rows = v2_q('window_species', $params);
+    if ($rows === []) {
+        return [];
+    }
+    $last = v2_stmt('window_last_row');
+    foreach ($rows as &$r) {
+        $l = $last([':s' => $r['Sci_Name'], ':d2' => $params[':d2'], ':t2' => $params[':t2']])[0] ?? [];
+        $r += ['Date' => $l['Date'] ?? substr($r['last'], 0, 10), 'Com_Name' => $l['Com_Name'] ?? '',
+            'Confidence' => $l['Confidence'] ?? $r['cmax'], 'File_Name' => $l['File_Name'] ?? ''];
+    }
+    unset($r);
+    return $rows;
 }
 
 /** The one-entry memo behind v2_session_rows(). Clear it with `$m = &v2_session_memo(); $m = [];` (benchmarks). */
@@ -388,10 +426,13 @@ function &v2_session_memo(): array
     return $memo;
 }
 
-/** @return array{detections:int, species:int, last:?DateTimeImmutable} */
-function v2_session_summary(DateTimeImmutable $since): array
+/**
+ * Totals of the session since $since (or of the window [$since, $until)).
+ * @return array{detections:int, species:int, last:?DateTimeImmutable}
+ */
+function v2_session_summary(DateTimeImmutable $since, ?DateTimeImmutable $until = null): array
 {
-    $rows = v2_session_rows($since);
+    $rows = v2_session_rows($since, $until);
     return [
         'detections' => array_sum(array_map('intval', array_column($rows, 'n'))),
         'species' => count($rows),
@@ -403,17 +444,21 @@ function v2_session_summary(DateTimeImmutable $since): array
  * One row per species heard since $since, newest first, with the clip and confidence of its
  * latest detection, the confidence range and whether the species is new (first heard in the
  * session, from the species cache's first-heard time). No per-species queries.
+ * With $until it covers the finished session [$since, $until): one window_last_row lookup per
+ * species gives the newest clip inside the window, and is_new means first heard in the window.
  * @return list<array{sci:string, n:int, last:DateTimeImmutable, clip:array, conf:float,
  *   conf_min:float, conf_max:float, is_new:bool, names:array}>
  */
-function v2_session_species(DateTimeImmutable $since): array
+function v2_session_species(DateTimeImmutable $since, ?DateTimeImmutable $until = null): array
 {
-    $rows = v2_session_rows($since);
+    $rows = v2_session_rows($since, $until);
     if ($rows === []) {
         return [];
     }
     $known = v2_species_index();
-    $sinceStr = $since->setTimezone(new DateTimeZone(v2_tz()))->format('Y-m-d H:i:s');
+    $tz = new DateTimeZone(v2_tz());
+    $sinceStr = $since->setTimezone($tz)->format('Y-m-d H:i:s');
+    $untilStr = $until?->setTimezone($tz)->format('Y-m-d H:i:s');
     $out = [];
     foreach ($rows as $r) {
         $sci = $r['Sci_Name'];
@@ -426,18 +471,29 @@ function v2_session_species(DateTimeImmutable $since): array
             'conf' => (float) $r['Confidence'],
             'conf_min' => (float) $r['cmin'],
             'conf_max' => (float) $r['cmax'],
-            'is_new' => $first >= $sinceStr,
+            'is_new' => $first >= $sinceStr && ($untilStr === null || $first < $untilStr),
             'names' => v2_names($sci, $r['Com_Name']),
         ];
     }
     return $out;
 }
 
-/** Detections per hour of day since $since (optionally one species). @return array<int, int> 0..23 */
-function v2_session_hours(DateTimeImmutable $since, ?string $sci = null): array
+/**
+ * Detections per hour of day since $since (optionally one species), or in the window
+ * [$since, $until). One species within a window is not needed and throws.
+ * @return array<int, int> 0..23
+ */
+function v2_session_hours(DateTimeImmutable $since, ?string $sci = null, ?DateTimeImmutable $until = null): array
 {
-    $params = v2_session_params($since);
-    $rows = $sci === null ? v2_q('session_hours', $params) : v2_q('species_session_hours', $params + [':s' => $sci]);
+    if ($sci !== null && $until !== null) {
+        throw new InvalidArgumentException('v2_session_hours: $sci with $until is not supported');
+    }
+    $params = v2_session_params($since, $until);
+    $rows = match (true) {
+        $until !== null => v2_q('window_hours', $params),
+        $sci === null => v2_q('session_hours', $params),
+        default => v2_q('species_session_hours', $params + [':s' => $sci]),
+    };
     $hours = array_fill(0, 24, 0);
     foreach ($rows as $r) {
         $h = (int) $r['h'];
@@ -637,4 +693,135 @@ function v2_species_recordings(string $sci, int $page, int $per = 20): array
     }
     unset($r);
     return ['rows' => $rows, 'has_more' => $more];
+}
+
+// ---------------------------------------------------------------------------------------------
+// Boot history (Sessies): one session = one boot of the Pi, from the system journal.
+
+/**
+ * Runs `journalctl --no-pager -q <args>` (each argument shell-escaped, stderr dropped).
+ * @return ?string the output lines joined with "\n" (possibly ''), or null on a non-zero exit
+ *   or when exec() is unavailable. Never throws.
+ */
+function v2_journalctl(array $args): ?string
+{
+    $cmd = 'journalctl --no-pager -q';
+    foreach ($args as $a) {
+        $cmd .= ' ' . escapeshellarg((string) $a);
+    }
+    $out = [];
+    $code = 1;
+    try {
+        $ok = @exec($cmd . ' 2>/dev/null', $out, $code);
+    } catch (Throwable) {
+        return null;
+    }
+    return $ok === false || $code !== 0 ? null : implode("\n", $out);
+}
+
+/**
+ * Every boot in the journal, newest first. The current boot (index 0) starts at
+ * v2_session_start() like Home and is still running (last = now, until = null, clean = null).
+ * A finished boot's window is [start, until): until is the next newer boot's start.
+ * The raw list is cached for 60 s, the facts of a finished boot for good (v2_boot_facts).
+ * @return list<array{id:string, start:DateTimeImmutable, last:DateTimeImmutable,
+ *   until:?DateTimeImmutable, current:bool, clean:?bool}>
+ */
+function v2_boots(): array
+{
+    $raw = v2_cache('boots', 60, fn () => json_decode(v2_journalctl(['--list-boots', '-o', 'json']) ?? '[]', true) ?: []);
+    $list = [];
+    foreach (is_array($raw) ? $raw : [] as $b) {
+        if (is_array($b) && is_string($b['boot_id'] ?? null) && preg_match('/^[0-9a-f]{32}$/', $b['boot_id'])) {
+            $list[] = $b;
+        }
+    }
+    usort($list, static fn ($a, $b) => (int) ($b['index'] ?? 0) <=> (int) ($a['index'] ?? 0));
+    $tz = new DateTimeZone(v2_tz());
+    $at = static fn (int $us): DateTimeImmutable => (new DateTimeImmutable('@' . intdiv($us, 1000000)))->setTimezone($tz);
+    $out = [];
+    $next = null; // start of the next newer boot
+    foreach ($list as $b) {
+        $id = $b['boot_id'];
+        if ((int) ($b['index'] ?? -1) === 0) {
+            $boot = ['id' => $id, 'start' => v2_session_start(), 'last' => v2_now(), 'until' => null, 'current' => true, 'clean' => null];
+        } else {
+            $f = v2_boot_facts($id, (int) ($b['first_entry'] ?? 0));
+            $boot = ['id' => $id, 'start' => $at((int) $f['start_us']), 'last' => $at((int) ($b['last_entry'] ?? 0)),
+                'until' => $next, 'current' => false, 'clean' => $f['clean']];
+        }
+        $next = $boot['start'];
+        $out[] = $boot;
+    }
+    return $out;
+}
+
+/**
+ * Start (µs) and shutdown marker of a finished boot, from two journalctl calls, cached for good
+ * (a failed call too; /dev/shm is cleared on reboot).
+ * - start_us = __REALTIME_TIMESTAMP − __MONOTONIC_TIMESTAMP of the boot's last entry: right even
+ *   when the boot began on a stale clock (no RTC), once the clock synced; else $firstUs.
+ * - clean: an entry for UNIT=shutdown.target → true, none → false (power lost), failure → null.
+ * @return array{start_us:int, clean:?bool}
+ */
+function v2_boot_facts(string $id, int $firstUs): array
+{
+    return v2_cache('boot-' . $id, 0, static function () use ($id, $firstUs): array {
+        $start = $firstUs;
+        $last = v2_journalctl(['-b', $id, '-n', '1', '-o', 'json']);
+        $lines = $last === null ? [] : array_values(array_filter(explode("\n", $last), 'strlen'));
+        $e = $lines === [] ? null : json_decode(end($lines), true);
+        if (is_array($e) && is_numeric($e['__REALTIME_TIMESTAMP'] ?? null) && is_numeric($e['__MONOTONIC_TIMESTAMP'] ?? null)) {
+            $start = (int) $e['__REALTIME_TIMESTAMP'] - (int) $e['__MONOTONIC_TIMESTAMP'];
+        }
+        $shutdown = v2_journalctl(['-b', $id, '-n', '1', '-o', 'json', 'UNIT=shutdown.target']);
+        return ['start_us' => $start, 'clean' => $shutdown === null ? null : trim($shutdown) !== ''];
+    });
+}
+
+/** One element of v2_boots(), or null for a malformed (no journalctl call) or unknown id. */
+function v2_boot(string $id): ?array
+{
+    if (!preg_match('/^[0-9a-f]{32}$/', $id)) {
+        return null;
+    }
+    foreach (v2_boots() as $b) {
+        if ($b['id'] === $id) {
+            return $b;
+        }
+    }
+    return null;
+}
+
+/**
+ * List-row numbers of a session: totals, the newest detection ('Y-m-d H:i:s' or null) and the
+ * 3 species heard most (ties: newest first). A finished boot's card is cached per MAX(rowid)
+ * (older versions of it are removed); the current boot's is not cached.
+ * @return array{detections:int, species:int, last:?string, top:list<array{sci:string, nl:string}>}
+ */
+function v2_session_card(array $boot): array
+{
+    $build = static function () use ($boot): array {
+        $rows = v2_session_species($boot['start'], $boot['until']);
+        $top = $rows;
+        usort($top, static fn ($a, $b) => [$b['n'], $b['last']] <=> [$a['n'], $a['last']]);
+        return [
+            'detections' => array_sum(array_column($rows, 'n')),
+            'species' => count($rows),
+            'last' => $rows === [] ? null : $rows[0]['last']->format('Y-m-d H:i:s'),
+            'top' => array_map(static fn ($r) => ['sci' => $r['sci'], 'nl' => $r['names']['nl']], array_slice($top, 0, 3)),
+        ];
+    };
+    if ($boot['current']) {
+        return $build();
+    }
+    $key = 'session-' . $boot['id'] . '-' . v2_db_key();
+    $hit = v2_cache_read($key, 0);
+    if ($hit !== null && is_array($hit[0])) {
+        return $hit[0];
+    }
+    foreach (glob(v2_cache_dir() . '/session-' . $boot['id'] . '-*.json') ?: [] as $old) {
+        @unlink($old);
+    }
+    return v2_cache_write($key, $build());
 }

@@ -143,7 +143,7 @@ details[open] > summary .chevron { transform: rotate(90deg); }
 .warn-card .link { min-height: 44px; }
 .home-list { display: flex; flex-direction: column; gap: 8px; }
 .empty { padding: 16px 14px; }
-.vh, table.list.home thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.vh, li.rec .purged-word, table.list.home thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 table.list.home, table.list.home tbody { display: block; width: 100%; }
 table.list.home td { display: block; padding: 0; }
 table.list.home td.sp { flex: 1; min-width: 0; }
@@ -154,22 +154,22 @@ table.list.home td.when, table.list.home td.count { display: none; }
 @media (min-width: 900px) {
   .home-head h1 { align-items: center; gap: 10px; font-size: var(--f28); line-height: 1.2; }
   .home-head h1 svg { width: 26px; height: 26px; margin-top: 0; }
-  .home-head .summary { font-size: var(--f17); }
+  .home-head + .summary { font-size: var(--f17); }
   .chart { padding: 14px 18px; }
   .chart .bars { height: 56px; }
-  .home-list { background: var(--surface); border-radius: var(--radius); gap: 0; overflow-x: auto; }
-  .home-list > h2 { padding: 14px 18px 8px; }
-  table.list.home { display: table; border-collapse: collapse; min-width: 520px; border-radius: 0; }
-  table.list.home thead { position: static; width: auto; height: auto; overflow: visible; clip-path: none; display: table-header-group; }
-  table.list.home tbody { display: table-row-group; }
-  table.list.home tr.row { display: table-row; }
-  table.list.home th { text-align: left; font-size: var(--f13); font-weight: 600; color: var(--muted); padding: 8px 12px; }
-  table.list.home td, table.list.home td.when, table.list.home td.count { display: table-cell; padding: 8px 12px; vertical-align: middle; border-top: 1px solid var(--line); }
-  table.list.home th:first-child, table.list.home td:first-child { padding-left: 18px; }
-  table.list.home th:last-child, table.list.home td:last-child { padding-right: 18px; text-align: right; }
-  table.list.home td.count span { display: block; }
-  table.list.home .row-sub { display: none; }
-  table.list.home .photo { width: 48px; height: 48px; }
+  main > .home-list { background: var(--surface); border-radius: var(--radius); gap: 0; overflow-x: auto; }
+  main > .home-list > h2 { padding: 14px 18px 8px; }
+  main > .home-list > .home { display: table; border-collapse: collapse; min-width: 520px; border-radius: 0; }
+  main > .home-list > .home thead { position: static; width: auto; height: auto; overflow: visible; clip-path: none; display: table-header-group; }
+  main > .home-list > .home tbody { display: table-row-group; }
+  main > .home-list > .home tr.row { display: table-row; }
+  main > .home-list > .home th { text-align: left; font-size: var(--f13); font-weight: 600; color: var(--muted); padding: 8px 12px; }
+  main > .home-list > .home td, main > .home-list > .home td.when, main > .home-list > .home td.count { display: table-cell; padding: 8px 12px; vertical-align: middle; border-top: 1px solid var(--line); }
+  main > .home-list > .home th:first-child, main > .home-list > .home td:first-child { padding-left: 18px; }
+  main > .home-list > .home th:last-child, main > .home-list > .home td:last-child { padding-right: 18px; text-align: right; }
+  main > .home-list > .home td.count span { display: block; }
+  main > .home-list > .home .row-sub { display: none; }
+  main > .home-list > .home .photo { width: 48px; height: 48px; }
 }
 
 /* Soorten: list on phones, sortable table with the detail beside it from 900px */
@@ -247,4 +247,32 @@ table.species tr[aria-current] { background: var(--sel); }
   .detail h1 { font-size: var(--f28); }
   .detail .hours .bars { height: 64px; }
   .detail .days .bars { height: 48px; }
+}
+
+/* Sessies: one row per boot; the session detail beside the list from 900px (grid as Soorten) */
+body:has(.sessions-page) main, body:has(.sessions-page) .topnav-in { max-width: 1200px; }
+.sessions-page, .sessions-list { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.page-head + .summary { margin-top: -8px; }
+.sessions .row-text { flex: 1; }
+.sessions li[aria-current] { background: var(--sel); }
+.session-photos { display: flex; flex: none; }
+.session-photos .photo { width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--surface); font-size: var(--f15); }
+.session-photos .photo + .photo { margin-left: -12px; }
+.sessions .chip, .session-detail .chip { border: 0; padding: 1px 8px; }
+.sessions .chip-power, .session-detail .chip-power { background: transparent; color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
+.has-detail .sessions-list { display: none; }
+.session-detail .detail-body { padding-top: 0; gap: 12px; }
+.back-link { align-self: flex-start; min-height: 44px; margin-left: -6px; display: inline-flex; align-items: center; gap: 2px; text-decoration: none; }
+.session-detail h1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--f20); line-height: 1.3; }
+.power-note { display: flex; align-items: center; gap: 6px; }
+.power-note svg { color: var(--warn); }
+li.rec .play.purged { width: 44px; height: 44px; min-height: 44px; border-radius: 50%; padding: 0; }
+@media (min-width: 900px) {
+  .sessions-page { gap: 20px; }
+  main > .page-head + .summary { margin-top: -16px; }
+  .sessions-page.has-detail { display: grid; }
+  .has-detail .sessions-list { display: flex; }
+  .session-detail .detail-body { padding: 14px 18px 18px; gap: 16px; }
+  .session-detail h1 { font-size: var(--f20); }
+  .session-detail .home-list > h2 { font-size: var(--f15); }
 }

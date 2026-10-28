@@ -22,6 +22,9 @@ const V2_SORT_NONE = ['M8 9l4-4 4 4', 'M16 15l-4 4-4-4'];
 const V2_SORT_ASC = ['M12 19V5', 'M5 12l7-7 7 7'];
 const V2_SORT_DESC = ['M12 5v14', 'M19 12l-7 7-7-7'];
 
+/** Highest recordings page accepted in ?page= (a larger value would overflow the OFFSET). */
+const V2_MAX_PAGE = 100000;
+
 /** /v2/species.php?… from the non-empty parameters (spaces as +). */
 function v2_species_url(array $params, string $hash = ''): string
 {
@@ -58,8 +61,11 @@ v2_guard(function (): void {
         $dir = V2_SPECIES_COLS[$sort][1];
     }
     $sci = isset($_GET['sci']) && is_string($_GET['sci']) && $_GET['sci'] !== '' ? $_GET['sci'] : null;
-    $from = ($_GET['from'] ?? '') === 'home' ? 'home' : 'species';
-    $page = max(1, (int) ($_GET['page'] ?? 1));
+    $from = in_array($_GET['from'] ?? '', ['home', 'sessions'], true) ? $_GET['from'] : 'species';
+    $boot = $from === 'sessions' && is_string($_GET['boot'] ?? null) && preg_match('/^[0-9a-f]{32}$/', $_GET['boot']) ? $_GET['boot'] : null;
+    // Where the detail was opened from, kept through sorting and paging (Home, or a session on Sessies).
+    $origin = ['from' => $from === 'species' ? '' : $from, 'boot' => $boot];
+    $page = min(V2_MAX_PAGE, max(1, is_string($_GET['page'] ?? null) ? (int) $_GET['page'] : 1));
 
     $all = v2_species_all();
     $rows = v2_species_sort($all, $sort, $dir);
@@ -119,7 +125,7 @@ v2_guard(function (): void {
     $aria = $on ? ($dir === 'asc' ? 'ascending' : 'descending') : 'none';
     $icon = $on ? ($dir === 'asc' ? V2_SORT_ASC : V2_SORT_DESC) : V2_SORT_NONE;
     ?>
-<th scope="col" aria-sort="<?= $aria ?>" class="col-<?= h($key) ?>"><form method="get" action="/v2/species.php"><input type="hidden" name="dir" value="<?= $next ?>"><?php if ($sci !== null) { ?><input type="hidden" name="sci" value="<?= h($sci) ?>"><?php } ?><button type="submit" name="sort" value="<?= h($key) ?>"<?= $on ? ' class="on"' : '' ?>><?= h($label) ?><?= v2_icon($icon, 14, 2.2) ?></button></form></th>
+<th scope="col" aria-sort="<?= $aria ?>" class="col-<?= h($key) ?>"><form method="get" action="/v2/species.php"><input type="hidden" name="dir" value="<?= $next ?>"><?php if ($sci !== null) { ?><input type="hidden" name="sci" value="<?= h($sci) ?>"><?php foreach (array_filter($origin) as $k => $v) { ?><input type="hidden" name="<?= $k ?>" value="<?= h($v) ?>"><?php } } ?><button type="submit" name="sort" value="<?= h($key) ?>"<?= $on ? ' class="on"' : '' ?>><?= h($label) ?><?= v2_icon($icon, 14, 2.2) ?></button></form></th>
 <?php } ?>
 </tr></thead>
 <tbody>
@@ -146,7 +152,11 @@ foreach ($rows as $r) {
 </section>
 <?php if ($detail) {
     $nl = $detail['names']['nl'];
-    $back = $from === 'home' ? '/v2/' : v2_species_url($base);
+    $back = match ($from) {
+        'home' => '/v2/',
+        'sessions' => '/v2/sessions.php' . ($boot !== null ? '?boot=' . $boot : ''),
+        default => v2_species_url($base),
+    };
     $dayKeys = array_keys($days);
     $note = v2_station_note($all, $now);
     $shownFrom = ($page - 1) * 20 + 1;
@@ -186,17 +196,20 @@ foreach ($rows as $r) {
 <ul class="list rec-list">
 <?php foreach ($list as $rec) {
     $time = (string) $rec['Time'];
+    $purged = empty($rec['clip']['exists']);
     ?>
 <li class="rec">
 <div class="rec-main">
 <?= v2_play_button($rec['clip'], 'opname van ' . $time) ?>
-<span class="rec-text"><span class="rec-time"><?= h(substr($time, 0, 5)) ?></span><span class="rec-conf"><?= (int) round((float) $rec['Confidence'] * 100) ?>% zeker</span></span>
+<span class="rec-text"><span class="rec-time"><?= h(substr($time, 0, 5)) ?></span><span class="rec-conf"><?= (int) round((float) $rec['Confidence'] * 100) ?>% zeker<?= $purged ? ' · verwijderd' : '' ?></span></span>
 <a class="manage small" href="/views.php?view=Recordings&amp;filename=<?= h(urlencode((string) $rec['File_Name'])) ?>">Beheren</a>
 </div>
+<?php if (!$purged) { ?>
 <details>
 <summary><?= v2_icon(V2_CHEVRON, 18, 2) ?>Spectrogram</summary>
 <div class="spectro"><img loading="lazy" src="<?= h($rec['clip']['png']) ?>" alt="Spectrogram van de opname van <?= h($time) ?>"></div>
 </details>
+<?php } ?>
 </li>
 <?php } ?>
 </ul>
@@ -206,10 +219,13 @@ foreach ($rows as $r) {
 <?php } else { ?>
 <p class="rec-count small muted"><?= $page > 1 ? h(v2_fmt_int($shownFrom) . '–' . v2_fmt_int($shownTo)) : h(v2_fmt_int($shownTo)) ?> van <?= h(v2_fmt_int($detail['n'])) ?> opnames</p>
 <?php } ?>
-<?php if ($recs['has_more'] || $page > 1) { ?>
+<?php if ($recs['has_more'] || $page > 1) {
+    // Past the end, "Nieuwere opnames" goes to the last page that has rows.
+    $newer = $recs['rows'] === [] ? min($page - 1, max(1, (int) ceil($detail['n'] / 20))) : $page - 1;
+    ?>
 <div class="pager">
-<?php if ($page > 1) { ?><a class="link" href="<?= h(v2_species_url($base + ['sci' => $sci, 'from' => $from === 'home' ? 'home' : '', 'page' => $page > 2 ? $page - 1 : ''], '#detail')) ?>">Nieuwere opnames</a><?php } ?>
-<?php if ($recs['has_more']) { ?><a class="link more" href="<?= h(v2_species_url($base + ['sci' => $sci, 'from' => $from === 'home' ? 'home' : '', 'page' => $page + 1], '#detail')) ?>">Meer opnames</a><?php } ?>
+<?php if ($page > 1) { ?><a class="link" href="<?= h(v2_species_url($base + ['sci' => $sci] + $origin + ['page' => $newer > 1 ? $newer : ''], '#detail')) ?>">Nieuwere opnames</a><?php } ?>
+<?php if ($recs['has_more']) { ?><a class="link more" href="<?= h(v2_species_url($base + ['sci' => $sci] + $origin + ['page' => $page + 1], '#detail')) ?>">Meer opnames</a><?php } ?>
 </div>
 <?php } ?>
 </section>

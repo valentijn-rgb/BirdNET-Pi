@@ -13,11 +13,35 @@ fi
 DB=${V2_DB:-$HOME/BirdNET-Pi/scripts/birds.db}
 
 # 1. Index for per-species and per-day queries. Takes a write lock for ~1-2 s on 50k rows;
-#    the analysis writer retries for ~21 s (reporting.py), so it survives.
-sqlite3 "$DB" 'CREATE INDEX IF NOT EXISTS "detections_Sci_Name_Date_Time" ON "detections" ("Sci_Name","Date","Time");'
+#    the analysis writer retries for ~21 s (reporting.py), so it survives. The busy timeout lets this
+#    statement wait for a writer instead of aborting the script (set -e) on a transient lock.
+sqlite3 -cmd '.timeout 30000' "$DB" 'CREATE INDEX IF NOT EXISTS "detections_Sci_Name_Date_Time" ON "detections" ("Sci_Name","Date","Time");'
 
 # 2. Serve the v2 pages from the web root.
 sudo -u "$USER" ln -sfn "$HOME/BirdNET-Pi/homepage/v2" "$EXTRACTED/v2"
 
 # 3. Dutch/English names for the v2 pages (git-ignored, regenerated on every update).
 sudo -u "$USER" php "$HOME/BirdNET-Pi/scripts/v2_make_labels.php"
+
+# 4. Persistent journal + journal read access for caddy (Sessies page). Pi config change, opt-in.
+JDROP_DIR=${V2_JOURNALD_DIR:-/etc/systemd/journald.conf.d}
+JDIR=${V2_JOURNAL_DIR:-/var/log/journal}
+JDROP="$JDROP_DIR/birds-persistent.conf"
+if [ "${V2_PERSIST_JOURNAL:-}" = yes ] || [ -f "$JDROP" ]; then
+  want=$'[Journal]\nStorage=persistent\nSystemMaxUse=50M'
+  if [ "$(cat "$JDROP" 2>/dev/null)" != "$want" ] || [ ! -d "$JDIR" ]; then
+    mkdir -p "$JDROP_DIR" "$JDIR"
+    printf '%s\n' "$want" > "$JDROP"
+    systemd-tmpfiles --create --prefix "$JDIR" 2>/dev/null || true
+    systemctl restart systemd-journald
+    journalctl --flush 2>/dev/null || true
+    echo "v2: journald restarted"
+  fi
+  # PHP-FPM runs as caddy; reading the system journal needs this group. Trade-off: caddy can read
+  # all system logs (fine on a single-purpose LAN device; caddy already has NOPASSWD sudo).
+  if ! id -nG caddy | tr ' ' '\n' | grep -qx systemd-journal; then
+    usermod -aG systemd-journal caddy
+    systemctl restart 'php*-fpm.service'
+    echo "v2: php-fpm restarted"
+  fi
+fi
