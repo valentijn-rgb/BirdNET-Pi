@@ -76,6 +76,7 @@ v2_guard(function (): void {
     // Facts (start, clean) are looked up only for this page, its newer neighbour and the oldest boot.
     $boots = v2_boots(($page - 1) * V2_SESSIONS_PER_PAGE, V2_SESSIONS_PER_PAGE);
     $shown = array_slice($boots, ($page - 1) * V2_SESSIONS_PER_PAGE, V2_SESSIONS_PER_PAGE);
+    v2_window_fp_prefetch($detail !== null ? [...$shown, $detail] : $shown); // one query for all fingerprints
     $cards = [];
     foreach ($shown as $b) {
         $cards[$b['id']] = v2_session_card($b);

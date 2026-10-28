@@ -417,14 +417,59 @@ function v2_session_rows(DateTimeImmutable $since, ?DateTimeImmutable $until = n
  */
 function v2_window_fp(array $params): array
 {
+    $p = array_intersect_key($params, array_flip([':d', ':t', ':d2', ':t2']));
+    $pre = v2_boots_state()['fps'][v2_db_path() . '|' . implode(' ', $p)] ?? null;
+    if ($pre !== null) {
+        return $pre;
+    }
     static $run = null, $path = null;
     if ($run === null || $path !== v2_db_path()) {
         $run = v2_stmt('window_fp');
         $path = v2_db_path();
     }
-    $fp = $run(array_intersect_key($params, array_flip([':d', ':t', ':d2', ':t2'])))[0] ?? [];
+    $fp = $run($p)[0] ?? [];
     return [(int) ($fp['n'] ?? 0), (int) ($fp['m'] ?? 0)];
 }
+
+/**
+ * Fingerprints of the finished, timed boots in $boots in one statement (window_fp per boot,
+ * joined by UNION ALL: about 4× cheaper than one call each), kept for this request so
+ * v2_window_fp() answers from them. Sessies calls it before building its cards.
+ */
+function v2_window_fp_prefetch(array $boots): void
+{
+    $wins = [];
+    foreach ($boots as $b) {
+        if (!$b['current'] && !v2_boot_timeless($b)) {
+            $wins[] = v2_session_params($b['start'], $b['until']);
+        }
+    }
+    if ($wins === []) {
+        return;
+    }
+    $parts = [];
+    $bind = [];
+    foreach ($wins as $i => $p) {
+        $parts[] = "SELECT $i AS i, " . substr(preg_replace('/:(d2|t2|d|t)\b/', ":\$1_$i", V2_SQL['window_fp']), strlen('SELECT '));
+        foreach ($p as $k => $v) {
+            $bind[$k . '_' . $i] = $v;
+        }
+    }
+    $t0 = hrtime(true);
+    $db = v2_db();
+    try {
+        $st = $db->prepare(implode(' UNION ALL ', $parts));
+    } catch (Exception $e) {
+        v2_db_rethrow($e, $db);
+    } finally {
+        $GLOBALS['v2_db_ms'] = ($GLOBALS['v2_db_ms'] ?? 0.0) + (hrtime(true) - $t0) / 1e6;
+    }
+    $s = &v2_boots_state();
+    foreach (v2_stmt_run($db, $st, $bind, 'window_fp_batch') as $r) {
+        $s['fps'][v2_db_path() . '|' . implode(' ', $wins[(int) $r['i']])] = [(int) $r['n'], (int) ($r['m'] ?? 0)];
+    }
+}
+
 
 /**
  * A finished window's rows (v2_window_rows) and window_hours rows, cached in /dev/shm under its
@@ -441,6 +486,15 @@ function v2_window_data(array $params): array
     [$n, $m] = $reg !== null ? [$reg['n'], $reg['m']] : v2_window_fp($params);
     $id = substr(md5(v2_db_path() . '|' . implode(' ', $params)), 0, 16);
     $key = "window-$id-$n-$m";
+    // Rows, hours and first-heard times are read separately by one page: load the entry once per
+    // request (the memo lives in the per-request boot state, keyed by fingerprint).
+    $s = &v2_boots_state();
+    return $s['window_data'][$key] ??= v2_window_load($params, $reg === null ? null : $reg['id'], "$n-$m", $id, $key);
+}
+
+/** v2_window_data() without the memo: /dev/shm, then the boot's state entry, then the queries. */
+function v2_window_load(array $params, ?string $boot, string $fp, string $id, string $key): array
+{
     $valid = static fn ($v) => is_array($v) && is_array($v['rows'] ?? null) && is_array($v['hours'] ?? null) && is_array($v['first'] ?? null);
     $hit = v2_cache_read($key, 0);
     if ($hit !== null && $valid($hit[0])) {
@@ -449,19 +503,20 @@ function v2_window_data(array $params): array
     foreach (glob(v2_cache_dir() . "/window-$id-*.json") ?: [] as $old) {
         @unlink($old);
     }
-    if ($reg !== null) {
-        $saved = v2_session_state_read($reg['id'], "$n-$m")['window'] ?? null;
+    if ($boot !== null) {
+        $saved = v2_session_state_read($boot, $fp)['window'] ?? null;
         if ($valid($saved)) {
             return v2_cache_write($key, $saved);
         }
     }
     $rows = v2_window_rows($params);
     $data = v2_cache_write($key, ['rows' => $rows, 'hours' => v2_q('window_hours', $params), 'first' => v2_first_heard(array_column($rows, 'Sci_Name'))]);
-    if ($reg !== null) {
-        v2_session_state_write($reg['id'], "$n-$m", ['window' => $data]);
+    if ($boot !== null) {
+        v2_session_state_write($boot, $fp, ['window' => $data]);
     }
     return $data;
 }
+
 
 /** Persisted data of a finished boot: <state dir>/sessions/<boot id>.json = {fp, card?, window?}. */
 function v2_session_state_file(string $id): string
