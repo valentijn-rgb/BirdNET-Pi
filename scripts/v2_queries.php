@@ -60,8 +60,8 @@ const V2_SQL = [
     'window_species' => "SELECT Sci_Name, COUNT(*) AS n, MAX(Date||' '||Time) AS last, MIN(Confidence) AS cmin, MAX(Confidence) AS cmax
         FROM detections WHERE " . V2_WINDOW_WHERE . ' GROUP BY Sci_Name ORDER BY last DESC',
     'window_hours' => 'SELECT substr(Time,1,2) AS h, COUNT(*) AS n FROM detections WHERE ' . V2_WINDOW_WHERE . ' GROUP BY h',
-    // Fingerprint of a finished window (row count + max rowid): keys its cached Sessies card.
-    'window_fp' => 'SELECT COUNT(*) AS n, MAX(rowid) AS m FROM detections WHERE ' . V2_WINDOW_WHERE,
+    // Fingerprint of a finished window (row count, max rowid, confidence sum): keys its cached Sessies card.
+    'window_fp' => 'SELECT COUNT(*) AS n, MAX(rowid) AS m, TOTAL(Confidence) AS c FROM detections WHERE ' . V2_WINDOW_WHERE,
     'window_last_row' => 'SELECT Date, Time, Com_Name, Confidence, File_Name FROM detections
         WHERE Sci_Name = :s AND Date <= :d2 AND (Date < :d2 OR Time < :t2) ORDER BY Date DESC, Time DESC LIMIT 1',
 ];
@@ -411,11 +411,12 @@ function v2_session_rows(DateTimeImmutable $since, ?DateTimeImmutable $until = n
 }
 
 /**
- * Fingerprint of a finished window: [row count, max rowid]. Keys its cached card and data. The
- * statement is prepared once per request (and DB), since Sessies runs it for every listed boot.
- * @return array{0:int, 1:int}
+ * Fingerprint of a finished window, "count-maxrowid-confidencesum": keys its cached card and data.
+ * The content term TOTAL(Confidence) changes when a row is edited in place, as BirdNET-Pi's
+ * Change Detection does (birdnet_changeidentification.sh: new species, Confidence 0, new file),
+ * which leaves the count and max rowid alone. Prepared once per request (and DB).
  */
-function v2_window_fp(array $params): array
+function v2_window_fp(array $params): string
 {
     $p = array_intersect_key($params, array_flip([':d', ':t', ':d2', ':t2']));
     $pre = v2_boots_state()['fps'][v2_db_path() . '|' . implode(' ', $p)] ?? null;
@@ -427,14 +428,32 @@ function v2_window_fp(array $params): array
         $run = v2_stmt('window_fp');
         $path = v2_db_path();
     }
-    $fp = $run($p)[0] ?? [];
-    return [(int) ($fp['n'] ?? 0), (int) ($fp['m'] ?? 0)];
+    return v2_fp_string($run($p)[0] ?? []);
+}
+
+/** window_fp row → "n-m-c" (c to 4 decimals, enough for confidences stored to 4 places). */
+function v2_fp_string(array $r): string
+{
+    return sprintf('%d-%d-%.4f', (int) ($r['n'] ?? 0), (int) ($r['m'] ?? 0), (float) ($r['c'] ?? 0));
 }
 
 /**
- * Fingerprints of the finished, timed boots in $boots in one statement (window_fp per boot,
- * joined by UNION ALL: about 4× cheaper than one call each), kept for this request so
- * v2_window_fp() answers from them. Sessies calls it before building its cards.
+ * window_fp for $count windows in one statement (UNION ALL; window $i binds :d_$i :t_$i :d2_$i
+ * :t2_$i and returns column i). Exposed so ExplainTest can check its plan.
+ */
+function v2_window_fp_batch_sql(int $count): string
+{
+    $parts = [];
+    for ($i = 0; $i < $count; $i++) {
+        $parts[] = "SELECT $i AS i, " . substr(preg_replace('/:(d2|t2|d|t)\b/', ":\$1_$i", V2_SQL['window_fp']), strlen('SELECT '));
+    }
+    return implode(' UNION ALL ', $parts);
+}
+
+/**
+ * Fingerprints of the finished, timed boots in $boots in one statement (about 4× cheaper than
+ * one window_fp call each), kept for this request so v2_window_fp() answers from them. Sessies
+ * calls it before building its cards.
  */
 function v2_window_fp_prefetch(array $boots): void
 {
@@ -447,10 +466,8 @@ function v2_window_fp_prefetch(array $boots): void
     if ($wins === []) {
         return;
     }
-    $parts = [];
     $bind = [];
     foreach ($wins as $i => $p) {
-        $parts[] = "SELECT $i AS i, " . substr(preg_replace('/:(d2|t2|d|t)\b/', ":\$1_$i", V2_SQL['window_fp']), strlen('SELECT '));
         foreach ($p as $k => $v) {
             $bind[$k . '_' . $i] = $v;
         }
@@ -458,7 +475,7 @@ function v2_window_fp_prefetch(array $boots): void
     $t0 = hrtime(true);
     $db = v2_db();
     try {
-        $st = $db->prepare(implode(' UNION ALL ', $parts));
+        $st = $db->prepare(v2_window_fp_batch_sql(count($wins)));
     } catch (Exception $e) {
         v2_db_rethrow($e, $db);
     } finally {
@@ -466,14 +483,15 @@ function v2_window_fp_prefetch(array $boots): void
     }
     $s = &v2_boots_state();
     foreach (v2_stmt_run($db, $st, $bind, 'window_fp_batch') as $r) {
-        $s['fps'][v2_db_path() . '|' . implode(' ', $wins[(int) $r['i']])] = [(int) $r['n'], (int) ($r['m'] ?? 0)];
+        $s['fps'][v2_db_path() . '|' . implode(' ', $wins[(int) $r['i']])] = v2_fp_string($r);
     }
 }
 
 
+
 /**
  * A finished window's rows (v2_window_rows) and window_hours rows, cached in /dev/shm under its
- * fingerprint (ttl 0): a finished session only changes when rows inside it are added or deleted,
+ * fingerprint (ttl 0): a finished session only changes when rows inside it are added, deleted or edited,
  * and that changes the key. Older entries of the same window are removed.
  * For a boot's window (registered by v2_session_card) the data is also kept in the state dir,
  * so after a reboot (empty /dev/shm) it is read back instead of queried again.
@@ -483,13 +501,13 @@ function v2_window_data(array $params): array
 {
     // A boot's window registered by v2_session_card: its fingerprint is known and the data persists.
     $reg = v2_boots_state()['windows'][implode(' ', $params)] ?? null;
-    [$n, $m] = $reg !== null ? [$reg['n'], $reg['m']] : v2_window_fp($params);
+    $fp = $reg !== null ? $reg['fp'] : v2_window_fp($params);
     $id = substr(md5(v2_db_path() . '|' . implode(' ', $params)), 0, 16);
-    $key = "window-$id-$n-$m";
+    $key = "window-$id-$fp";
     // Rows, hours and first-heard times are read separately by one page: load the entry once per
     // request (the memo lives in the per-request boot state, keyed by fingerprint).
     $s = &v2_boots_state();
-    return $s['window_data'][$key] ??= v2_window_load($params, $reg === null ? null : $reg['id'], "$n-$m", $id, $key);
+    return $s['window_data'][$key] ??= v2_window_load($params, $reg === null ? null : $reg['id'], $fp, $id, $key);
 }
 
 /** v2_window_data() without the memo: /dev/shm, then the boot's state entry, then the queries. */
@@ -524,7 +542,7 @@ function v2_session_state_file(string $id): string
     return v2_state_dir() . '/sessions/' . $id . '.json';
 }
 
-/** The boot's persisted entry when it was saved under fingerprint $fp ("count-maxrowid"), else []. */
+/** The boot's persisted entry when it was saved under fingerprint $fp (v2_window_fp), else []. */
 function v2_session_state_read(string $id, string $fp): array
 {
     if (!preg_match('/^[0-9a-f]{32}$/', $id)) {
@@ -555,6 +573,12 @@ function v2_session_state_write(string $id, string $fp, array $part): void
         }
         error_log("v2: cannot write $dir/$id.json");
         return;
+    }
+    // Temp files left by a write that died before its rename (older than a minute, so not in flight).
+    foreach (glob("$dir/.s-*") ?: [] as $f) {
+        if ((@filemtime($f) ?: time()) < time() - 60) {
+            @unlink($f);
+        }
     }
     $known = array_flip(array_column(v2_boot_list(), 'id'));
     if ($known === []) {
@@ -1138,7 +1162,7 @@ function v2_boot_timeless(array $boot): bool
 /**
  * List-row numbers of a session: totals, the newest detection ('Y-m-d H:i:s' or null) and the
  * 3 species heard most (ties: newest first). A finished boot's card is built from window_species
- * alone and cached under the window's fingerprint (row count + max rowid inside it), so new
+ * alone and cached under the window's fingerprint (v2_window_fp: count, max rowid and confidence sum inside it), so new
  * detections in the current session leave it alone and a deletion inside it rebuilds it; older
  * versions are removed. It is also kept in the state dir (v2_session_state_write), which survives
  * a reboot; /dev/shm stays the fast layer. The current boot's card is not cached.
@@ -1163,11 +1187,11 @@ function v2_session_card(array $boot): array
         return $card([]);
     }
     $params = v2_session_params($boot['start'], $boot['until']);
-    [$n, $m] = v2_window_fp($params);
+    $fp = v2_window_fp($params);
     $s = &v2_boots_state();
-    $s['windows'][implode(' ', $params)] = ['id' => $boot['id'], 'n' => $n, 'm' => $m]; // for v2_window_data
+    $s['windows'][implode(' ', $params)] = ['id' => $boot['id'], 'fp' => $fp]; // for v2_window_data
     unset($s);
-    $key = 'session-' . $boot['id'] . '-' . $n . '-' . $m;
+    $key = 'session-' . $boot['id'] . '-' . $fp;
     $hit = v2_cache_read($key, 0);
     if ($hit !== null && is_array($hit[0])) {
         return $hit[0];
@@ -1176,11 +1200,11 @@ function v2_session_card(array $boot): array
         @unlink($old);
     }
     // After a reboot /dev/shm is empty, but the state dir still has the card.
-    $saved = v2_session_state_read($boot['id'], "$n-$m")['card'] ?? null;
+    $saved = v2_session_state_read($boot['id'], $fp)['card'] ?? null;
     if (is_array($saved)) {
         return v2_cache_write($key, $saved);
     }
     $built = v2_cache_write($key, $card(v2_q('window_species', $params)));
-    v2_session_state_write($boot['id'], "$n-$m", ['card' => $built]);
+    v2_session_state_write($boot['id'], $fp, ['card' => $built]);
     return $built;
 }
