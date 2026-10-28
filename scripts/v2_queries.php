@@ -5,8 +5,36 @@
 
 define('V2_DB_PATH', getenv('BIRDS_DB') ?: __DIR__ . '/birds.db');
 
-/** Named SQL used by v2_q(). */
-const V2_SQL = [];
+/**
+ * Rows of the listening session: from :d :t (since) onwards, across midnight. Bound by
+ * v2_session_params(). The only place the session range is written, so an upper bound can be
+ * added here (and in v2_session_params) later.
+ */
+const V2_SESSION_WHERE = 'Date >= :d AND (Date > :d OR Time >= :t)';
+
+/**
+ * Named SQL used by v2_q(). Each one is checked by EXPLAIN QUERY PLAN in emulator/tests/php/ExplainTest.php.
+ * `GROUP BY +Sci_Name`: the unary + stops SQLite from walking the whole (Sci_Name, Date, Time)
+ * index to skip the GROUP BY sort; it then searches the Date range instead and sorts the few
+ * groups. Without it session_species reads every row of the table (no sqlite_stat1 on the Pi).
+ */
+const V2_SQL = [
+    'db_key' => 'SELECT MAX(rowid) AS m, COUNT(*) AS c FROM detections',
+    'session_species' => "SELECT Sci_Name, COUNT(*) AS n, MAX(Date||' '||Time) AS last, MIN(Confidence) AS cmin, MAX(Confidence) AS cmax
+        FROM detections WHERE " . V2_SESSION_WHERE . ' GROUP BY +Sci_Name ORDER BY last DESC',
+    'session_hours' => 'SELECT substr(Time,1,2) AS h, COUNT(*) AS n FROM detections WHERE ' . V2_SESSION_WHERE . ' GROUP BY substr(Time,1,2)',
+    'species_session_hours' => 'SELECT substr(Time,1,2) AS h, COUNT(*) AS n FROM detections WHERE Sci_Name = :s AND ' . V2_SESSION_WHERE
+        . ' GROUP BY substr(Time,1,2)',
+    'last_row' => 'SELECT Date, Time, Com_Name, Confidence, File_Name FROM detections WHERE Sci_Name = :s ORDER BY Date DESC, Time DESC LIMIT 1',
+    'first_seen' => "SELECT Date||' '||Time AS first FROM detections WHERE Sci_Name = :s ORDER BY Date, Time LIMIT 1",
+    'species_all' => "SELECT Sci_Name, COUNT(*) AS n, MIN(Date||' '||Time) AS first, MAX(Date||' '||Time) AS last FROM detections GROUP BY Sci_Name",
+    'species_d30' => 'SELECT Sci_Name, Date, COUNT(*) AS n FROM detections WHERE Date >= :from GROUP BY +Sci_Name, Date',
+    'species_detail' => "SELECT COUNT(*) AS n, MIN(Date||' '||Time) AS first, MAX(Date||' '||Time) AS last FROM detections WHERE Sci_Name = :s",
+    'species_days' => 'SELECT Date, COUNT(*) AS n FROM detections WHERE Sci_Name = :s AND Date >= :from GROUP BY Date',
+    'species_recordings' => 'SELECT Date, Time, Com_Name, Confidence, File_Name FROM detections WHERE Sci_Name = :s
+        ORDER BY Date DESC, Time DESC LIMIT :lim OFFSET :off',
+    'last_detection' => 'SELECT Date, Time, Sci_Name, Com_Name FROM detections ORDER BY Date DESC, Time DESC LIMIT 1',
+];
 
 final class V2DbBusy extends RuntimeException {}
 
@@ -55,14 +83,38 @@ function v2_db(): SQLite3
 /** Runs V2_SQL[$name] with named params (':x' or 'x' keys) and returns all rows as assoc arrays. */
 function v2_q(string $name, array $params = []): array
 {
+    return v2_stmt($name)($params);
+}
+
+/**
+ * Prepares V2_SQL[$name] once and returns a runner that re-binds it per call (for per-species
+ * lookups in a loop). Same params, result shape and timing as v2_q().
+ * @return Closure(array): list<array<string, mixed>>
+ */
+function v2_stmt(string $name): Closure
+{
     if (!isset(V2_SQL[$name])) {
         throw new InvalidArgumentException("v2_q: unknown query $name");
     }
     $t0 = hrtime(true);
     $db = v2_db();
-    $rows = [];
     try {
         $st = $db->prepare(V2_SQL[$name]);
+    } catch (Exception $e) {
+        v2_db_rethrow($e, $db);
+    } finally {
+        $GLOBALS['v2_db_ms'] = ($GLOBALS['v2_db_ms'] ?? 0.0) + (hrtime(true) - $t0) / 1e6;
+    }
+    return static fn (array $params = []): array => v2_stmt_run($db, $st, $params);
+}
+
+function v2_stmt_run(SQLite3 $db, SQLite3Stmt $st, array $params): array
+{
+    $t0 = hrtime(true);
+    $rows = [];
+    try {
+        $st->reset();
+        $st->clear();
         foreach ($params as $k => $v) {
             $type = match (true) {
                 is_int($v), is_bool($v) => SQLITE3_INTEGER,
@@ -76,7 +128,8 @@ function v2_q(string $name, array $params = []): array
         while (($r = $res->fetchArray(SQLITE3_ASSOC)) !== false) {
             $rows[] = $r;
         }
-        $st->close();
+        $res->finalize();
+        $st->reset(); // ends the read so the shared lock is not held between calls
     } catch (Exception $e) {
         v2_db_rethrow($e, $db);
     } finally {
@@ -143,13 +196,20 @@ function v2_session_start(): DateTimeImmutable
     return v2_now();
 }
 
+function v2_cache_dir(): string
+{
+    return getenv('BIRDS_CACHE_DIR') ?: '/dev/shm/birds-v2';
+}
+
 /**
  * JSON file cache (in RAM on the Pi). $ttl seconds, 0 = never expires (the key carries the
- * version). A missing, expired or corrupt file runs $build and stores its result.
+ * version). A missing, expired or corrupt file runs $build and stores its result. A miss returns
+ * the JSON round-tripped value, so it has the same shape as a hit (objects become arrays): store
+ * strings, build DateTimeImmutable after reading.
  */
 function v2_cache(string $key, int $ttl, callable $build): mixed
 {
-    $dir = getenv('BIRDS_CACHE_DIR') ?: '/dev/shm/birds-v2';
+    $dir = v2_cache_dir();
     $file = $dir . '/' . preg_replace('/[^A-Za-z0-9._-]/', '_', $key) . '.json';
 
     clearstatcache(true, $file);
@@ -163,11 +223,14 @@ function v2_cache(string $key, int $ttl, callable $build): mixed
     }
 
     $value = $build();
+    $json = json_encode(['v' => $value], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
+    if ($json !== false) {
+        $value = json_decode($json, true)['v']; // same shape as a hit
+    }
     if (!is_dir($dir) && !@mkdir($dir, 0700, true) && !is_dir($dir)) {
         error_log("v2: cannot create cache dir $dir");
         return $value;
     }
-    $json = json_encode(['v' => $value], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
     $tmp = @tempnam($dir, '.tmp-');
     if ($json === false || $tmp === false || @file_put_contents($tmp, $json) !== strlen($json) || !@rename($tmp, $file)) {
         if ($tmp !== false) {
@@ -250,4 +313,221 @@ function v2_thumb_url(string $url, int $width = 320): string
         return $base . $m[1] . '/thumb' . $m[2] . '/' . $thumb;
     }
     return $base . $path;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Queries
+
+/** Changes on every insert or delete: "maxrowid:count". Versions the species cache. */
+function v2_db_key(): string
+{
+    $r = v2_q('db_key')[0] ?? [];
+    return (int) ($r['m'] ?? 0) . ':' . (int) ($r['c'] ?? 0);
+}
+
+/** 'Y-m-d H:i:s' in the system timezone → DateTimeImmutable. */
+function v2_dt(string $s): DateTimeImmutable
+{
+    return new DateTimeImmutable($s, new DateTimeZone(v2_tz()));
+}
+
+/** Binds V2_SESSION_WHERE (:d, :t) for rows at or after $since (local time). */
+function v2_session_params(DateTimeImmutable $since): array
+{
+    $local = $since->setTimezone(new DateTimeZone(v2_tz()));
+    return [':d' => $local->format('Y-m-d'), ':t' => $local->format('H:i:s')];
+}
+
+/** @return array{detections:int, species:int, last:?DateTimeImmutable} */
+function v2_session_summary(DateTimeImmutable $since): array
+{
+    $rows = v2_q('session_species', v2_session_params($since));
+    $last = $rows === [] ? null : max(array_column($rows, 'last'));
+    return [
+        'detections' => array_sum(array_map('intval', array_column($rows, 'n'))),
+        'species' => count($rows),
+        'last' => $last === null ? null : v2_dt($last),
+    ];
+}
+
+/**
+ * One row per species heard since $since, newest first, with the clip and confidence of its
+ * latest detection, the confidence range and whether the species is new (first seen in the session).
+ * @return list<array{sci:string, n:int, last:DateTimeImmutable, clip:array, conf:float,
+ *   conf_min:float, conf_max:float, is_new:bool, names:array}>
+ */
+function v2_session_species(DateTimeImmutable $since): array
+{
+    $rows = v2_q('session_species', v2_session_params($since));
+    if ($rows === []) {
+        return [];
+    }
+    $lastRow = v2_stmt('last_row');
+    $firstSeen = v2_stmt('first_seen');
+    $sinceStr = $since->setTimezone(new DateTimeZone(v2_tz()))->format('Y-m-d H:i:s');
+    $out = [];
+    foreach ($rows as $r) {
+        $sci = $r['Sci_Name'];
+        $lr = $lastRow([':s' => $sci])[0];
+        $first = $firstSeen([':s' => $sci])[0]['first'];
+        $out[] = [
+            'sci' => $sci,
+            'n' => (int) $r['n'],
+            'last' => v2_dt($r['last']),
+            'clip' => v2_clip($lr),
+            'conf' => (float) $lr['Confidence'],
+            'conf_min' => (float) $r['cmin'],
+            'conf_max' => (float) $r['cmax'],
+            'is_new' => $first >= $sinceStr,
+            'names' => v2_names($sci, $lr['Com_Name']),
+        ];
+    }
+    return $out;
+}
+
+/** Detections per hour of day since $since (optionally one species). @return array<int, int> 0..23 */
+function v2_session_hours(DateTimeImmutable $since, ?string $sci = null): array
+{
+    $params = v2_session_params($since);
+    $rows = $sci === null ? v2_q('session_hours', $params) : v2_q('species_session_hours', $params + [':s' => $sci]);
+    $hours = array_fill(0, 24, 0);
+    foreach ($rows as $r) {
+        $h = (int) $r['h'];
+        if ($h >= 0 && $h < 24) {
+            $hours[$h] += (int) $r['n'];
+        }
+    }
+    return $hours;
+}
+
+/** The last $days dates ending today, oldest first: ['Y-m-d' => 0, ...]. */
+function v2_day_keys(int $days): array
+{
+    $today = v2_now()->setTime(12, 0);
+    $keys = [];
+    for ($i = $days - 1; $i >= 0; $i--) {
+        $keys[$today->modify("-$i days")->format('Y-m-d')] = 0;
+    }
+    return $keys;
+}
+
+/**
+ * Every species ever heard: totals, first/last ('Y-m-d H:i:s'), detections per day for the last
+ * 30 days (oldest first, today last), names and is_new (first heard this session). Cached per
+ * DB version and day (d30 depends on today); is_new is added after the cache read.
+ * @return list<array{sci:string, n:int, first:string, last:string, d30:list<int>, names:array, is_new:bool}>
+ */
+function v2_species_all(): array
+{
+    $today = v2_now()->format('Y-m-d');
+    $key = 'species-' . str_replace(':', '-', v2_db_key()) . '-' . $today;
+    $rows = v2_cache($key, 0, function () {
+        $days = v2_day_keys(30);
+        $d30 = [];
+        foreach (v2_q('species_d30', [':from' => array_key_first($days)]) as $r) {
+            if (isset($days[$r['Date']])) {
+                $d30[$r['Sci_Name']][$r['Date']] = (int) $r['n'];
+            }
+        }
+        $out = [];
+        foreach (v2_q('species_all') as $r) {
+            $sci = $r['Sci_Name'];
+            $out[] = [
+                'sci' => $sci,
+                'n' => (int) $r['n'],
+                'first' => $r['first'],
+                'last' => $r['last'],
+                'd30' => array_values(array_replace($days, $d30[$sci] ?? [])),
+                'names' => v2_names($sci),
+            ];
+        }
+        foreach (glob(v2_cache_dir() . '/species-*.json') ?: [] as $old) {
+            @unlink($old); // older DB versions / days; v2_cache writes the new one next
+        }
+        return $out;
+    });
+    $start = v2_session_start()->setTimezone(new DateTimeZone(v2_tz()))->format('Y-m-d H:i:s');
+    foreach ($rows as &$r) {
+        $r['is_new'] = $r['first'] >= $start;
+    }
+    unset($r);
+    return $rows;
+}
+
+/**
+ * Sorts v2_species_all() rows. $sort: total|last|first|name|d30, $dir: asc|desc; anything else
+ * is total/desc. Ties break on last desc. name compares the Dutch name, accents folded.
+ */
+function v2_species_sort(array $rows, string $sort, string $dir): array
+{
+    if (!in_array($sort, ['total', 'last', 'first', 'name', 'd30'], true)) {
+        $sort = 'total';
+        $dir = 'desc';
+    }
+    if (!in_array($dir, ['asc', 'desc'], true)) {
+        $sort = 'total';
+        $dir = 'desc';
+    }
+    $fold = static function (string $s): string {
+        $t = @iconv('UTF-8', 'ASCII//TRANSLIT', $s);
+        return $t === false ? $s : $t;
+    };
+    $keys = [];
+    foreach ($rows as $i => $r) {
+        $keys[$i] = match ($sort) {
+            'total' => (int) $r['n'],
+            'last' => (string) $r['last'],
+            'first' => (string) $r['first'],
+            'name' => $fold((string) ($r['names']['nl'] ?? $r['sci'])),
+            'd30' => array_sum($r['d30']),
+        };
+    }
+    $sign = $dir === 'asc' ? 1 : -1;
+    $idx = array_keys($rows);
+    usort($idx, static function ($a, $b) use ($keys, $rows, $sort, $sign) {
+        $c = $sort === 'name' ? strnatcasecmp($keys[$a], $keys[$b]) : $keys[$a] <=> $keys[$b];
+        return $c !== 0 ? $sign * $c : strcmp((string) $rows[$b]['last'], (string) $rows[$a]['last']);
+    });
+    return array_map(static fn ($i) => $rows[$i], $idx);
+}
+
+/** @return ?array{sci:string, n:int, first:string, last:string, names:array} null when never heard */
+function v2_species_detail(string $sci): ?array
+{
+    $r = v2_q('species_detail', [':s' => $sci])[0] ?? null;
+    if ($r === null || (int) $r['n'] === 0) {
+        return null;
+    }
+    return ['sci' => $sci, 'n' => (int) $r['n'], 'first' => $r['first'], 'last' => $r['last'], 'names' => v2_names($sci)];
+}
+
+/** Detections per day for the last $days days ending today, oldest first, zero-filled. */
+function v2_species_days(string $sci, int $days = 30): array
+{
+    $out = v2_day_keys(max(1, $days));
+    foreach (v2_q('species_days', [':s' => $sci, ':from' => array_key_first($out)]) as $r) {
+        if (isset($out[$r['Date']])) {
+            $out[$r['Date']] = (int) $r['n'];
+        }
+    }
+    return $out;
+}
+
+/**
+ * One page of a species' detections, newest first; each row gets 'clip'. Fetches $per + 1 rows
+ * to know whether there is a next page.
+ * @return array{rows: list<array>, has_more: bool}
+ */
+function v2_species_recordings(string $sci, int $page, int $per = 20): array
+{
+    $page = max(1, $page);
+    $per = max(1, $per);
+    $rows = v2_q('species_recordings', [':s' => $sci, ':lim' => $per + 1, ':off' => ($page - 1) * $per]);
+    $more = count($rows) > $per;
+    $rows = array_slice($rows, 0, $per);
+    foreach ($rows as &$r) {
+        $r['clip'] = v2_clip($r);
+    }
+    unset($r);
+    return ['rows' => $rows, 'has_more' => $more];
 }
