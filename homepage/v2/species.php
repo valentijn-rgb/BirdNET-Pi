@@ -102,7 +102,6 @@ v2_guard(function (): void {
     // Phone and desktop headings differ (as in the design); the other one is display: none.
     ?>
 <div class="species-page<?= $detail ? ' has-detail' : '' ?>">
-<section class="species-list" aria-labelledby="species-h">
 <header class="page-head">
 <?php if ($all === []) { ?>
 <<?= $headTag ?> id="species-h" class="page-title">Soorten</<?= $headTag ?>>
@@ -112,6 +111,7 @@ v2_guard(function (): void {
 <p class="summary muted wide-only">Alle tijd: <strong><?= h(v2_fmt_int($total)) ?></strong> <?= $total === 1 ? 'detectie' : 'detecties' ?> · <strong><?= h(v2_fmt_int($nSp)) ?></strong> <?= $soorten ?> · eerst <?= h($firstAll) ?> · laatst <?= h($lastAll) ?></p>
 <?php } ?>
 </header>
+<section class="species-list" aria-labelledby="species-h">
 <?php if ($all === []) { ?>
 <p class="card empty muted">Nog geen soorten gehoord</p>
 <?php } else { ?>
@@ -125,7 +125,7 @@ v2_guard(function (): void {
 <button type="submit" class="button nojs">Toon</button>
 </form>
 <div class="table-wrap">
-<table class="species">
+<table class="species dt">
 <caption class="small muted">Klik op een kolomkop om te sorteren</caption>
 <thead><tr>
 <?php foreach (V2_SPECIES_COLS as $key => [$label, $def]) {

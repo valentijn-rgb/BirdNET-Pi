@@ -40,12 +40,18 @@ function v2_session_sub(array $boot, array $card, DateTimeImmutable $now): strin
     if (v2_boot_timeless($boot)) {
         return 'tijd onbekend · geen detecties';
     }
-    $end = v2_session_end($boot, $card) ?? $now;
-    $dur = v2_fmt_duration($end->getTimestamp() - $boot['start']->getTimestamp());
+    $dur = v2_session_dur($boot, $card, $now);
     if ($card['detections'] === 0) {
         return $dur . ' · geen detecties';
     }
     return $dur . ' · ' . v2_fmt_int($card['detections']) . ' detecties · ' . v2_fmt_int($card['species']) . ' ' . ($card['species'] === 1 ? 'soort' : 'soorten');
+}
+
+/** "1 u 30 min" (until now while it runs). */
+function v2_session_dur(array $boot, array $card, DateTimeImmutable $now): string
+{
+    $end = v2_session_end($boot, $card) ?? $now;
+    return v2_fmt_duration($end->getTimestamp() - $boot['start']->getTimestamp());
 }
 
 /** The session's span, or "Tijd onbekend" when its start is not before its end (clock never synced). */
@@ -76,6 +82,13 @@ v2_guard(function (): void {
     // Facts (start, clean) are looked up only for this page, its newer neighbour and the oldest boot.
     $boots = v2_boots(($page - 1) * V2_SESSIONS_PER_PAGE, V2_SESSIONS_PER_PAGE);
     $shown = array_slice($boots, ($page - 1) * V2_SESSIONS_PER_PAGE, V2_SESSIONS_PER_PAGE);
+    // Without ?boot the desktop panel previews the newest finished session on this page (or the
+    // running one when it is the only one); phones keep the plain list and never see it.
+    $chosen = $detail !== null;
+    if (!$chosen && $shown !== []) {
+        $finished = array_values(array_filter($shown, static fn ($b) => !$b['current']));
+        $detail = $finished[0] ?? $shown[0];
+    }
     v2_window_fp_prefetch($detail !== null ? [...$shown, $detail] : $shown); // one query for all fingerprints
     $cards = [];
     foreach ($shown as $b) {
@@ -85,17 +98,21 @@ v2_guard(function (): void {
         $detailCard = $cards[$detail['id']] ?? v2_session_card($detail);
     }
 
-    v2_page_start($detail ? v2_session_title($detail, $detailCard) : 'Sessies', 'sessions');
-    $headTag = $detail ? 'h2' : 'h1'; // one h1 per page: the session when the detail is open
+    v2_page_start($chosen ? v2_session_title($detail, $detailCard) : 'Sessies', 'sessions');
+    $headTag = $chosen ? 'h2' : 'h1'; // one h1 per page: the session when one is opened
+    $pageClass = $chosen ? ' has-detail has-panel' : ($detail !== null ? ' has-panel' : '');
+    $from = ($page - 1) * V2_SESSIONS_PER_PAGE + 1;
+    $to = $from + count($shown) - 1;
+    $range = ($page > 1 ? v2_fmt_int($from) . '–' . v2_fmt_int($to) : v2_fmt_int($to)) . ' van ' . v2_fmt_int($k) . ' ' . ($k === 1 ? 'sessie' : 'sessies');
     ?>
-<div class="sessions-page<?= $detail ? ' has-detail' : '' ?>">
-<section class="sessions-list" aria-labelledby="sessions-h">
+<div class="sessions-page<?= $pageClass ?>">
 <header class="page-head">
 <<?= $headTag ?> id="sessions-h" class="page-title">Sessies</<?= $headTag ?>>
 <?php if ($k > 0) { ?>
 <p class="summary muted"><strong><?= h(v2_fmt_int($k)) ?></strong> <?= $k === 1 ? 'sessie' : 'sessies' ?> · sinds <?= h(v2_fmt_when(end($boots)['start'], $now)) ?></p>
 <?php } ?>
 </header>
+<section class="sessions-list" aria-labelledby="sessions-h">
 <?php if ($k === 0) { ?>
 <div class="card empty">
 <p class="muted">Nog geen sessies bekend</p>
@@ -103,18 +120,37 @@ v2_guard(function (): void {
 <a class="link" href="/v2/">Huidige sessie op Home</a>
 </div>
 <?php } else { ?>
-<ol class="list sessions">
+<ol class="list sessions phone-only">
 <?php foreach ($shown as $b) {
     $card = $cards[$b['id']];
     ?>
-<li class="row"<?= $detail && $detail['id'] === $b['id'] ? ' aria-current="true"' : '' ?>><a href="<?= h(v2_sessions_url($page, $b['id'])) ?>"><span class="row-text"><span class="row-head"><span class="row-title"><?= h(v2_session_title($b, $card)) ?></span><?= v2_session_chip($b) ?></span><span class="row-sub"><?= h(v2_session_sub($b, $card, $now)) ?></span></span><span class="session-photos"><?php foreach ($card['top'] as $t) { ?><?= v2_photo($t['sci'], $t['nl'], 40) ?><?php } ?></span></a></li>
+<li class="row"<?= $chosen && $detail['id'] === $b['id'] ? ' aria-current="true"' : '' ?>><a href="<?= h(v2_sessions_url($page, $b['id'])) ?>"><span class="row-text"><span class="row-head"><span class="row-title"><?= h(v2_session_title($b, $card)) ?></span><?= v2_session_chip($b) ?></span><span class="row-sub"><?= h(v2_session_sub($b, $card, $now)) ?></span></span><span class="session-photos"><?php foreach ($card['top'] as $t) { ?><?= v2_photo($t['sci'], $t['nl'], 40) ?><?php } ?></span></a></li>
 <?php } ?>
 </ol>
-<?php
-    $from = ($page - 1) * V2_SESSIONS_PER_PAGE + 1;
-    $to = $from + count($shown) - 1;
+<div class="table-wrap wide-only">
+<table class="sessions-table dt">
+<caption class="small muted">Nieuwste eerst · <?= h($range) ?></caption>
+<thead><tr><th scope="col">Start</th><th scope="col">Einde</th><th scope="col">Duur</th><th scope="col" class="num">Detecties</th><th scope="col" class="num">Soorten</th><th scope="col">Top soorten</th></tr></thead>
+<tbody>
+<?php foreach ($shown as $b) {
+    $card = $cards[$b['id']];
+    $timeless = v2_boot_timeless($b);
+    [$start, $end] = $timeless ? ['Tijd onbekend', '–'] : explode(' – ', v2_session_title($b, $card), 2) + [1 => ''];
+    $chip = v2_session_chip($b);
     ?>
-<p class="small muted"><?= $page > 1 ? h(v2_fmt_int($from) . '–' . v2_fmt_int($to)) : h(v2_fmt_int($to)) ?> van <?= h(v2_fmt_int($k)) ?> <?= $k === 1 ? 'sessie' : 'sessies' ?></p>
+<tr<?= $detail && $detail['id'] === $b['id'] ? ' aria-current="true"' : '' ?>>
+<td class="start"><a href="<?= h(v2_sessions_url($page, $b['id'])) ?>#detail"><span><?= h($start) ?></span><?= $b['current'] ? $chip : '' ?></a></td>
+<td class="end"><span><?= h($end) ?></span><?= $b['current'] ? '' : $chip ?></td>
+<td class="dur"><?= h($timeless ? 'onbekend' : v2_session_dur($b, $card, $now)) ?></td>
+<td class="num total"><?= h(v2_fmt_int($card['detections'])) ?></td>
+<td class="num"><?= h(v2_fmt_int($card['species'])) ?></td>
+<td><span class="session-photos"><?php foreach ($card['top'] as $t) { ?><?= v2_photo($t['sci'], $t['nl'], 32) ?><?php } ?></span></td>
+</tr>
+<?php } ?>
+</tbody>
+</table>
+</div>
+<p class="small muted phone-only"><?= h($range) ?></p>
 <?php if ($page > 1 || $page < $pages) { ?>
 <div class="pager">
 <?php if ($page > 1) { ?><a class="link" href="<?= h(v2_sessions_url($page - 1)) ?>">Nieuwere sessies</a><?php } ?>
@@ -126,18 +162,19 @@ v2_guard(function (): void {
 <?php if ($detail) {
     $end = v2_session_end($detail, $detailCard);
     $last = $end ?? $now;
+    $dTag = $chosen ? 'h1' : 'h2';
     ?>
-<aside id="detail" class="detail session-detail" aria-labelledby="detail-h">
+<aside id="detail" class="detail session-detail<?= $chosen ? '' : ' detail-default' ?>" aria-labelledby="detail-h">
 <div class="detail-body">
 <header class="page-head">
-<a class="back-link" href="<?= h(v2_sessions_url($page)) ?>" data-back aria-label="Terug"><?= v2_icon(V2_BACK, 22, 2) ?>Terug</a>
-<h1 id="detail-h"><span><?= h(v2_session_title($detail, $detailCard)) ?></span><?= v2_session_chip($detail) ?></h1>
+<?php if ($chosen) { ?><a class="back-link" href="<?= h(v2_sessions_url($page)) ?>" data-back aria-label="Terug"><?= v2_icon(V2_BACK, 22, 2) ?>Terug</a><?php } ?>
+<<?= $dTag ?> id="detail-h" class="session-title"><span><?= h(v2_session_title($detail, $detailCard)) ?></span><?= v2_session_chip($detail) ?></<?= $dTag ?>>
 <p class="muted">Duur <?= h(v2_boot_timeless($detail) ? 'onbekend (de klok liep nog niet gelijk)' : v2_fmt_duration($last->getTimestamp() - $detail['start']->getTimestamp())) ?> · laatst actief <?= h(v2_fmt_when($last, $now)) ?></p>
 <?php if ($detail['clean'] === false) { ?>
 <p class="power-note small muted"><?= v2_icon(V2_ICON_POWER, 14, 2) ?>De stroom viel weg: de Pi sloot niet netjes af.</p>
 <?php } ?>
 </header>
-<?php v2_session_view($detail['start'], $detail['until'], ['current' => $detail['current'], 'boot' => $detail['id']]); ?>
+<?php v2_session_view($detail['start'], $detail['until'], ['current' => $detail['current'], 'boot' => $detail['id'], 'panel' => true]); ?>
 </div>
 </aside>
 <?php } ?>

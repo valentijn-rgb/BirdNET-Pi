@@ -18,11 +18,14 @@ function v2_conf_range(float $min, float $max): string
  * Prints a session: [$since, $until), or since $since while it runs ($until null).
  * $opt: current (bool) — the running session (Home's empty state and wording);
  *       boot (?string) — the boot id when shown on Sessies (row links come back to it), null on Home;
+ *       panel (bool) — inside the Sessies panel: no "Laatst gehoord"/"Deze sessie" columns (that
+ *       panel always shows the row form, so they would be hidden weight on every row);
  *       between (?callable) — printed after the summary line (Home: recorder card and Sessies link).
  */
 function v2_session_view(DateTimeImmutable $since, ?DateTimeImmutable $until, array $opt): void
 {
     $current = (bool) ($opt['current'] ?? false);
+    $panel = (bool) ($opt['panel'] ?? false);
     $boot = $opt['boot'] ?? null;
     $now = v2_now();
     $sum = v2_session_summary($since, $until);
@@ -51,7 +54,7 @@ function v2_session_view(DateTimeImmutable $since, ?DateTimeImmutable $until, ar
 <p class="card empty muted">Nog niets gehoord sinds <?= h(v2_fmt_when($since, $now)) ?></p>
 <?php } else { ?>
 <table class="list home">
-<thead><tr><th scope="col">Soort</th><th scope="col">Laatst gehoord</th><th scope="col">Deze sessie</th><th scope="col">Opname</th></tr></thead>
+<thead><tr><th scope="col">Soort</th><?php if (!$panel) { ?><th scope="col">Laatst gehoord</th><th scope="col">Deze sessie</th><?php } ?><th scope="col">Opname</th></tr></thead>
 <tbody>
 <?php foreach ($rows as $r) {
     $nl = $r['names']['nl'];
@@ -61,8 +64,10 @@ function v2_session_view(DateTimeImmutable $since, ?DateTimeImmutable $until, ar
     ?>
 <tr class="row">
 <td class="sp"><a href="<?= h($href) ?>"><?= v2_photo($r['sci'], $nl) ?><span class="row-text"><span class="row-head"><span class="row-name row-title"><?= h($nl) ?></span><?php if ($r['is_new']) { ?><span class="chip">Nieuw</span><?php } ?></span><span class="row-sub">laatst <?= h($when) ?> · <?= $r['n'] ?>× deze sessie · <?= h($conf) ?></span></span></a></td>
+<?php if (!$panel) { ?>
 <td class="when"><?= h($when) ?></td>
 <td class="count"><span><?= $r['n'] ?>×</span><span class="small muted"><?= h($conf) ?></span></td>
+<?php } ?>
 <td class="rec"><?= v2_play_button($r['clip'], 'laatste opname van ' . $nl . ', ' . $when) ?></td>
 </tr>
 <?php } ?>

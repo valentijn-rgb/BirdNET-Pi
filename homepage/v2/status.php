@@ -30,12 +30,12 @@ v2_guard(function (): void {
 <?= v2_icon(V2_STATE[$pstate][1], 36, 2) ?>
 <div>
 <p class="power-title"><?= h($p['value']) ?></p>
-<p class="small muted">Controle van powerbank en kabel</p>
+<p class="small muted">Controle van powerbank en kabel<span class="wide-only"> · luistert sinds <?= h(v2_fmt_since(v2_session_start(), v2_now())) ?></span></p>
 </div>
 </section>
 <div class="status-groups">
 <?php foreach ($s['groups'] as $g) { ?>
-<section class="status-group">
+<section class="status-group" data-group="<?= h(strtolower($g['title'])) ?>">
 <h2><?= h($g['title']) ?></h2>
 <ul class="list">
 <?php foreach ($g['items'] as $it) {
