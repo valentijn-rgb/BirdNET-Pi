@@ -324,11 +324,14 @@ function v2_clip(array $row): array
     return ['mp3' => $mp3, 'png' => $mp3 . '.png', 'exists' => is_file($extracted . '/' . implode('/', $parts))];
 }
 
-/** Wikimedia upload URL → $width px thumbnail URL. Other hosts are returned unchanged. */
-function v2_thumb_url(string $url, int $width = 320): string
+// Wikimedia only serves standard thumbnail widths (250, 330, 500, ...); 320 answers HTTP 400.
+const V2_THUMB_WIDTH = 330;
+
+/** Wikimedia upload/thumb URL → $width px thumbnail URL. Other hosts are returned unchanged. */
+function v2_thumb_url(string $url, int $width = V2_THUMB_WIDTH): string
 {
     $u = parse_url($url);
-    if (($u['host'] ?? '') !== 'upload.wikimedia.org' || !isset($u['path'])) {
+    if (!in_array($u['host'] ?? '', ['upload.wikimedia.org', 'thumb.wikimedia.org'], true) || !isset($u['path'])) {
         return $url;
     }
     $base = ($u['scheme'] ?? 'https') . '://' . $u['host'];
