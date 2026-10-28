@@ -22,6 +22,8 @@ TIMEOUT = 300
 POLL = 5
 CHECK_SECONDS = 2
 WAV_HEADER = 44
+SEND_ATTEMPTS = 5
+SEND_RETRY_DELAY = 15
 TIME_SYNCED = '/run/systemd/timesync/synchronized'
 
 
@@ -108,11 +110,16 @@ def main():
     title = f'{host} is online' if mic_ok else f'{host} is online, but the mic is silent'
     body = '\n'.join(lines)
     log.info('%s: %s', title, body.replace('\n', ' | '))
-    if os.path.exists(notifications.APPRISE_CONFIG) and os.path.getsize(notifications.APPRISE_CONFIG) > 0:
-        notifications.notify(body, title)
-    else:
+    if not (os.path.exists(notifications.APPRISE_CONFIG) and os.path.getsize(notifications.APPRISE_CONFIG) > 0):
         log.warning('No Apprise destinations configured, nothing sent')
-    return 0
+        return 0
+    # the network is often still settling right after boot
+    for attempt in range(1, SEND_ATTEMPTS + 1):
+        if notifications.notify(body, title):
+            return 0
+        log.warning('Sending failed (attempt %s of %s)', attempt, SEND_ATTEMPTS)
+        time.sleep(SEND_RETRY_DELAY)
+    return 1
 
 
 if __name__ == '__main__':
