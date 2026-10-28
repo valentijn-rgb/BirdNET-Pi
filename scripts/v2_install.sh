@@ -45,7 +45,9 @@ if [ "${V2_PERSIST_JOURNAL:-}" = yes ] || [ -f "$JDROP" ]; then
   # all system logs (fine on a single-purpose LAN device; caddy already has NOPASSWD sudo).
   if ! id -nG caddy | tr ' ' '\n' | grep -qx systemd-journal; then
     usermod -aG systemd-journal caddy
-    systemctl restart 'php*-fpm.service'
-    echo "v2: php-fpm restarted"
+    # Reload, not restart: new workers pick up the group, and a web-UI Update running inside
+    # php-fpm's cgroup (this script, via update_birdnet.sh) is not killed.
+    systemctl reload 'php*-fpm.service'
+    echo "v2: php-fpm reloaded"
   fi
 fi
