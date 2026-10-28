@@ -37,8 +37,31 @@
     player.addEventListener('play', function () { if (current) show(current, true); });
     player.addEventListener('pause', function () { if (current) show(current, false); });
     player.addEventListener('ended', function () { if (current) show(current, false); });
+    player.addEventListener('error', function () { if (current) show(current, false); });
   }
 
+  // A select[data-autosubmit] submits its form on change (the form keeps a no-JS submit button).
+  function initAutoSubmit() {
+    document.addEventListener('change', function (e) {
+      var el = e.target;
+      if (el && el.matches && el.matches('select[data-autosubmit]') && el.form) el.form.submit();
+    });
+  }
+
+  // a[data-back] goes back in history when we came from this site; otherwise it follows href.
+  function initBackLink() {
+    document.addEventListener('click', function (e) {
+      var a = e.target.closest && e.target.closest('a[data-back]');
+      if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      var same = false;
+      try { same = !!document.referrer && new URL(document.referrer).origin === location.origin; } catch (err) { same = false; }
+      if (same && history.length > 1) { e.preventDefault(); history.back(); }
+    });
+  }
+
+  document.documentElement.classList.add('js');
   initPhotoFallback();
   initPlayer();
+  initAutoSubmit();
+  initBackLink();
 })();

@@ -148,7 +148,7 @@ function v2_guard(callable $body): void
     }
 }
 
-/** Play button for a clip from v2_clip(); a purged clip gets a disabled button. */
+/** Play button for a clip from v2_clip(); a purged clip gets a disabled button with icon and word. */
 function v2_play_button(array $clip, string $label): string
 {
     if (!empty($clip['exists'])) {
@@ -157,7 +157,7 @@ function v2_play_button(array $clip, string $label): string
     }
     return '<button type="button" class="play purged" disabled aria-label="Clip verwijderd, niet af te spelen">'
         . '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">'
-        . '<path d="M4 4l16 16M8 5v6M8 15v4l6-3.8"/></svg></button>';
+        . '<path d="M4 4l16 16M8 5v6M8 15v4l6-3.8"/></svg><span class="purged-word">verwijderd</span></button>';
 }
 
 /** Species photo via photo.php; app.js swaps it for an initial-letter placeholder on error. */

@@ -3,7 +3,7 @@
   --bg: #EEF2EA; --surface: #FFFFFF; --text: #1E2A22; --muted: #4F5E54;
   --accent: #2F5E2B; --accent-strong: #1E3F1B; --on-accent: #FFFFFF;
   --bar: #3F7A39; --bar-empty: #7E8F82; --line: #E4EAE0; --nav-line: #C9D3C4;
-  --chip: #E1EBDD; --chip-text: #1E3F1B; --chip-line: #7E8F82;
+  --chip: #E1EBDD; --chip-text: #1E3F1B; --chip-line: #7E8F82; --sel: #F1F6EE;
   --warn: #9A3412; --on-warn: #FFFFFF; --ok: #2F5E2B; --err: #B42318;
   --radius: 16px;
   --f13: 13px; --f15: 15px; --f17: 17px; --f20: 20px; --f28: 28px;
@@ -14,7 +14,7 @@
     --bg: #121813; --surface: #1B241D; --text: #E4ECE0; --muted: #A9B8AC;
     --accent: #9FC59A; --accent-strong: #C3DEBF; --on-accent: #121813;
     --bar: #7FB077; --bar-empty: #5D6E61; --line: #2A352C; --nav-line: #2A352C;
-    --chip: #26352A; --chip-text: #C3DEBF; --chip-line: #7A8C7E;
+    --chip: #26352A; --chip-text: #C3DEBF; --chip-line: #7A8C7E; --sel: #223026;
     --warn: #F2A27A; --on-warn: #121813; --ok: #9FC59A; --err: #F59B8F;
   }
 }
@@ -87,7 +87,7 @@ main { flex: 1; width: 100%; max-width: 960px; margin: 0 auto; padding: 20px 16p
 .button.warn, .button.warn:hover { background: var(--warn); color: var(--on-warn); }
 .play { width: 44px; height: 44px; flex: none; border-radius: 50%; border: 0; background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
 .play[aria-pressed=true] { background: var(--accent-strong); }
-.play.purged { border: 1px dashed var(--bar-empty); background: var(--bg); color: var(--muted); cursor: not-allowed; }
+.play.purged { border: 1px dashed var(--bar-empty); background: var(--bg); color: var(--muted); cursor: not-allowed; flex-direction: column; width: auto; min-width: 44px; height: auto; min-height: 44px; border-radius: 12px; padding: 3px 6px; gap: 1px; font-size: var(--f13); line-height: 1.1; }
 
 /* Chips and states (always an icon and a word, never colour alone) */
 .chip { display: inline-flex; align-items: center; gap: 4px; font-size: var(--f13); font-weight: 600; color: var(--chip-text); background: var(--chip); border: 1px solid var(--chip-line); border-radius: 999px; padding: 0 8px; }
@@ -111,12 +111,6 @@ summary::-webkit-details-marker { display: none; }
 .chevron { color: var(--muted); transition: transform .15s; }
 details[open] > summary .chevron { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) { .chevron { transition: none; } }
-
-/* Species table (desktop) */
-table.species { width: 100%; border-collapse: collapse; }
-table.species th { text-align: left; font-size: var(--f13); font-weight: 600; color: var(--muted); padding: 8px 12px; }
-table.species td { padding: 8px 12px; border-top: 1px solid var(--line); }
-table.species th:first-child, table.species td:first-child { padding-left: 18px; }
 
 /* Tools */
 .tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -176,4 +170,81 @@ table.list.home td.when, table.list.home td.count { display: none; }
   table.list.home td.count span { display: block; }
   table.list.home .row-sub { display: none; }
   table.list.home .photo { width: 48px; height: 48px; }
+}
+
+/* Soorten: list on phones, sortable table with the detail beside it from 900px */
+body:has(.species-page) main, body:has(.species-page) .topnav-in { max-width: 1200px; }
+.species-page, .species-list { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.page-title { font-size: var(--f20); line-height: 1.3; }
+.sort-menu { display: flex; align-items: center; gap: 10px; }
+.sort-menu select { min-height: 44px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--bar-empty); background: var(--surface); color: var(--text); font: inherit; }
+.js .nojs { display: none; }
+.table-wrap { background: var(--surface); border-radius: var(--radius); overflow: hidden; }
+table.species, table.species tbody { display: block; width: 100%; }
+table.species thead, table.species td:not(.sp) { display: none; }
+table.species td { display: block; padding: 0; }
+table.species td.sp { flex: 1; min-width: 0; }
+table.species td.sp > a { display: flex; align-items: center; gap: 12px; min-height: 56px; color: inherit; text-decoration: none; }
+table.species tr[aria-current] { background: var(--sel); }
+.species-page .chip, .detail .chip { border: 0; padding: 1px 8px; }
+.has-detail .species-list { display: none; }
+
+/* Species detail */
+.detail { display: flex; flex-direction: column; min-width: 0; }
+.hero-wrap { position: relative; margin: -20px -16px 0; }
+.back { position: absolute; top: 12px; left: 12px; width: 44px; height: 44px; border-radius: 50%; background: var(--surface); color: var(--text); display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); }
+.detail-body { display: flex; flex-direction: column; gap: 16px; padding-top: 16px; }
+.title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.title h1 { overflow-wrap: anywhere; }
+.stats { margin-top: 4px; }
+.fig-title { font-size: var(--f17); font-weight: 700; }
+.detail .chart { gap: 8px; padding: 14px; }
+.hours .bars { height: 72px; }
+.days .bars { height: 56px; }
+.bars.spark { width: 120px; height: 24px; }
+.recs { display: flex; flex-direction: column; gap: 8px; }
+.recs h3 { margin-top: 4px; }
+.rec { padding: 0 12px; }
+.rec + .rec { border-top: 1px solid var(--line); }
+.rec-main { display: flex; align-items: center; gap: 12px; min-height: 56px; }
+.rec-text { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.rec-time { font-size: var(--f17); font-weight: 600; }
+.rec-conf { font-size: var(--f13); color: var(--muted); }
+.manage { min-height: 44px; display: flex; align-items: center; }
+.rec details { margin-left: 56px; }
+.rec summary { color: var(--accent); font-weight: 400; }
+.rec .spectro { margin-bottom: 8px; }
+.pager { display: flex; gap: 16px; flex-wrap: wrap; }
+
+@media (min-width: 900px) {
+  .page-title { font-size: var(--f28); line-height: 1.2; }
+  .species-list .summary { font-size: var(--f17); }
+  .sort-menu { display: none; }
+  .species-page { gap: 20px; }
+  .has-detail { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 24px; align-items: start; }
+  .has-detail .species-list { display: flex; }
+  .table-wrap { overflow-x: auto; }
+  table.species { display: table; border-collapse: collapse; }
+  table.species thead { display: table-header-group; }
+  table.species tbody { display: table-row-group; }
+  table.species tr.row { display: table-row; }
+  table.species td, table.species td:not(.sp) { display: table-cell; padding: 8px 12px; vertical-align: middle; border-top: 1px solid var(--line); }
+  table.species th { text-align: left; padding: 8px 6px 4px; }
+  table.species th:first-child, table.species td:first-child { padding-left: 18px; }
+  table.species th:last-child, table.species td:last-child { padding-right: 18px; text-align: right; }
+  table.species th button { min-height: 44px; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); font-size: var(--f13); font-weight: 600; cursor: pointer; }
+  table.species th button:hover { background: var(--chip); }
+  table.species th button.on { background: var(--chip); color: var(--chip-text); font-weight: 700; }
+  table.species tr.row:hover { background: var(--sel); }
+  table.species .photo { width: 48px; height: 48px; }
+  table.species .row-sub { display: none; }
+  table.species td.col-total { font-size: var(--f17); font-weight: 700; }
+  table.species td.col-first, table.species td.col-last { white-space: nowrap; }
+  .detail { background: var(--surface); border-radius: var(--radius); overflow: hidden; }
+  .hero-wrap { margin: 0; }
+  .detail-body { padding: 14px 18px 18px; }
+  .detail .chart { padding: 0; background: none; border-radius: 0; }
+  .detail h1 { font-size: var(--f28); }
+  .detail .hours .bars { height: 64px; }
+  .detail .days .bars { height: 48px; }
 }

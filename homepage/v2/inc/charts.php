@@ -10,7 +10,7 @@ const V2_MONTHS_LONG = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 
  * A zero becomes a 2-unit `bar-empty` stub so empty slots stay visible. Stretches to its box
  * (preserveAspectRatio="none"); CSS sets the drawn height.
  */
-function v2_bars_svg(array $values, string $ariaLabel, int $height = 40): string
+function v2_bars_svg(array $values, string $ariaLabel, int $height = 40, string $class = 'bars'): string
 {
     $values = array_values(array_map('intval', $values));
     $max = max([1, ...$values]);
@@ -24,8 +24,14 @@ function v2_bars_svg(array $values, string $ariaLabel, int $height = 40): string
         $h = max(2, (int) round($v / $max * $height));
         $rects .= '<rect class="bar" x="' . $x . '" y="' . ($height - $h) . '" width="8" height="' . $h . '"/>';
     }
-    return '<svg class="bars" viewBox="0 0 ' . (10 * count($values)) . ' ' . $height . '" preserveAspectRatio="none" role="img" aria-label="'
+    return '<svg class="' . h($class) . '" viewBox="0 0 ' . (10 * count($values)) . ' ' . $height . '" preserveAspectRatio="none" role="img" aria-label="'
         . h($ariaLabel) . '">' . $rects . '</svg>';
+}
+
+/** 30-day sparkline for the species table: the same bars at 24 px height. */
+function v2_spark_svg(array $values, string $ariaLabel): string
+{
+    return v2_bars_svg($values, $ariaLabel, 24, 'bars spark');
 }
 
 /** "5 in het uur van 13:00, 8 in het uur van 14:00, geen in andere uren"; "Nog geen detecties" when all zero. */
