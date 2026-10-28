@@ -75,7 +75,8 @@
     var retry = document.getElementById('logretry');
     if (!frame || !box) return;
     var src = frame.getAttribute('src'), paused = false;
-    function label() { if (state) state.textContent = !box.hidden ? 'verbroken' : paused ? 'gepauzeerd' : 'live'; }
+    // Paused wins: the user asked for it, whatever the stream is doing.
+    function label() { if (state) state.textContent = paused ? 'gepauzeerd' : !box.hidden ? 'verbroken' : 'live'; }
     function probe(onUp) {
       fetch(src, { cache: 'no-store' }).then(function (r) {
         if (!r.ok) throw new Error(r.status);
@@ -88,8 +89,9 @@
       pause.setAttribute('aria-pressed', paused ? 'true' : 'false');
       pause.querySelector('span').textContent = paused ? 'Hervat' : 'Pauzeer';
       pause.querySelector('path').setAttribute('d', paused ? PLAY : PAUSE);
-      frame.src = paused ? 'about:blank' : src;
       label();
+      // Hervat re-checks the stream, so a log that went down while paused shows the box again.
+      if (paused) frame.src = 'about:blank'; else probe(function () { if (!paused) frame.src = src; });
     });
     if (retry) retry.addEventListener('click', function () { probe(function () { if (!paused) frame.src = src; }); });
     probe();
