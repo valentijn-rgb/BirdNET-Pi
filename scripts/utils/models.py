@@ -1,3 +1,4 @@
+import json
 import logging
 import math
 import operator
@@ -212,6 +213,20 @@ class BirdNetV3(Basemodel):
         self.interpreter.set_tensor(self._input_layer_idx, np.array(chunk, dtype='float32')[np.newaxis, :])
         self.interpreter.invoke()
         return self.label(self.interpreter.get_tensor(self._output_layer_idx)[0])
+
+    def set_meta_data(self, lat, lon, week):
+        # the V3 geomodel's TFLite needs Flex ops, so its weekly lists are precomputed on the Mac
+        # (scripts/v3_make_species_list.py) for the Pi's fixed location
+        self._week = week48(week)
+
+    def get_species_list(self):
+        with open(os.path.join(MODEL_PATH, 'v3_species_by_week.json')) as f:
+            return json.load(f)['weeks'][str(self._week)]
+
+
+def week48(iso_week):
+    """ISO week (1-53) to the BirdNET week (1-48, four per month) the geomodels use."""
+    return min(48, max(1, round(iso_week * 48 / 52)))
 
 
 class MDataModel:

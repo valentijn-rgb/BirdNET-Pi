@@ -1,4 +1,6 @@
+import json
 import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -7,7 +9,7 @@ import numpy as np
 
 from scripts.utils.analysis import splitSignal
 from scripts.utils.helpers import MODEL_PATH
-from scripts.utils.models import get_model
+from scripts.utils.models import get_model, week48
 from tests.helpers import TESTDATA, Settings
 
 V3 = 'BirdNET_V3.0-preview3.1_Global_11K_FP16_pruned'
@@ -56,6 +58,26 @@ class TestBirdNetV3(unittest.TestCase):
         chunks = splitSignal(np.zeros(15 * model.sample_rate), model.sample_rate, 0.0, seconds=model.chunk_duration)
         self.assertEqual(len(chunks), 5)
         self.assertTrue(all(len(c) == 96000 for c in chunks))
+
+    @patch('scripts.utils.helpers._load_settings')
+    def test_species_list_for_week(self, mock_load_settings):
+        mock_load_settings.return_value = v3_settings()
+        model = get_model()
+        with tempfile.TemporaryDirectory() as model_path:
+            with open(os.path.join(model_path, 'v3_species_by_week.json'), 'w') as f:
+                json.dump({'latitude': 51.917, 'longitude': 4.455, 'threshold': 0.03,
+                           'weeks': {'41': ['Pica pica'], '42': ['Strix aluco']}}, f)
+            with patch('scripts.utils.models.MODEL_PATH', model_path):
+                model.set_meta_data(51.9, 4.5, 44)
+                self.assertEqual(model.get_species_list(), ['Pica pica'])
+
+
+class TestWeek48(unittest.TestCase):
+
+    def test_iso_week_edges(self):
+        self.assertEqual(week48(1), 1)
+        self.assertEqual(week48(53), 48)
+        self.assertEqual(week48(44), 41)
 
 
 if __name__ == '__main__':

@@ -29,7 +29,7 @@ Acanthornis magna_Scrubtit
 Acanthoventris drewseni_Acanthoventris drewseni
 Tachyspiza albogularis_Pied Goshawk
 Astur atricapillus_American Goshawk
-Astur gentilis_Eurasian Goshawk
+Accipiter gentilis_Northern Goshawk
 Accipiter badius_Shikra
 Accipiter bicolor_Bicolored Hawk
 Tachyspiza brevipes_Levant Sparrowhawk
@@ -933,7 +933,7 @@ Ardea cinerea_Gray Heron
 Ardea cocoi_Cocoi Heron
 Ardea goliath_Goliath Heron
 Ardea herodias_Great Blue Heron
-Ardea ibis_Western Cattle Egret
+Bubulcus ibis_Cattle Egret
 Ardea melanocephala_Black-headed Heron
 Ardea pacifica_White-necked Heron
 Ardea purpurea_Purple Heron
