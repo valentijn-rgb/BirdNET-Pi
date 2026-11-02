@@ -6,8 +6,9 @@ from unittest.mock import patch
 
 import librosa
 import numpy as np
+import soundfile
 
-from scripts.utils.analysis import splitSignal
+from scripts.utils.analysis import readAudioData, splitSignal
 from scripts.utils.helpers import MODEL_PATH
 from scripts.utils.models import get_model, week48
 from tests.helpers import TESTDATA, Settings
@@ -70,6 +71,19 @@ class TestBirdNetV3(unittest.TestCase):
             with patch('scripts.utils.models.MODEL_PATH', model_path):
                 model.set_meta_data(51.9, 4.5, 44)
                 self.assertEqual(model.get_species_list(), ['Pica pica'])
+
+
+class TestReadAudio(unittest.TestCase):
+
+    def test_recording_resamples_to_32k_without_resampy(self):
+        # the Pi records 48 kHz stereo and has soxr but not resampy
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, '2026-11-02-birdnet-15:41:10.wav')
+            soundfile.write(path, np.zeros((15 * 48000, 2), dtype='float32'), 48000)
+            with patch.dict('sys.modules', {'resampy': None}):
+                chunks = readAudioData(path, 0.0, 32000, 3)
+        self.assertEqual(len(chunks), 5)
+        self.assertTrue(all(len(c) == 96000 for c in chunks))
 
 
 class TestWeek48(unittest.TestCase):

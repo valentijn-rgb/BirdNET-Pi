@@ -48,7 +48,8 @@ def readAudioData(path, overlap, sample_rate, chunk_duration):
     log.info('READING AUDIO DATA...')
 
     # Open file with librosa (uses ffmpeg or libav)
-    sig, rate = librosa.load(path, sr=sample_rate, mono=True, res_type='kaiser_fast')
+    # soxr: 'kaiser_fast' needs resampy, which the Pi doesn't have (only matters for 32 kHz models like V3)
+    sig, rate = librosa.load(path, sr=sample_rate, mono=True, res_type='soxr_hq')
 
     # Split audio into chunks
     chunks = splitSignal(sig, rate, overlap, seconds=chunk_duration)
