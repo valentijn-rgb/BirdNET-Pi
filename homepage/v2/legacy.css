@@ -1,0 +1,117 @@
+/* The old tool pages (views.php?view=Settings etc.) in the v2 shell. Loaded after app.css on those
+   pages only; everything is scoped to .legacy, the wrapper around their unchanged markup. */
+
+.back-link { align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; gap: 2px; margin: -12px 0 -4px -6px; text-decoration: none; font-weight: var(--semi); }
+.legacy { display: flex; flex-direction: column; gap: 12px; min-width: 0; transition: opacity .3s; }
+.legacy > *, .legacy .settings > *, .legacy .settings form > * { min-width: 0; max-width: 100%; }
+.legacy h2 { font-size: var(--f20); margin: 0 0 4px; }
+.legacy h3 { margin: 12px 0 6px; text-align: left; }
+.legacy p { margin: 6px 0; }
+.legacy label { font-weight: var(--semi); }
+.legacy a:hover { font-weight: inherit; }
+.legacy img { max-width: 100%; height: auto; }
+.legacy hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+.legacy center { text-align: left; }
+
+/* The English banner repeats the page title. */
+.legacy .settings > .brbanner, .legacy .settings > .brbanner + br { display: none; }
+.legacy .brbanner { padding: 12px 14px; border-radius: var(--radius); background: var(--chip); color: var(--chip-text); font-weight: var(--semi); }
+
+/* Tables: settings sections become cards; data tables get v2 rows. */
+.legacy table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: var(--radius); overflow: hidden; margin: 0; }
+.legacy td, .legacy th { padding: 10px 12px; text-align: left; vertical-align: top; background: none; font-weight: inherit; }
+.legacy th { font-size: var(--f13); color: var(--muted); font-weight: var(--semi); }
+.legacy tr + tr > td, .legacy thead + tbody > tr:first-child > td { border-top: 1px solid var(--line); }
+.legacy .settings { display: flex; flex-direction: column; gap: 12px; padding: 0; }
+.legacy .settings form { display: flex; flex-direction: column; gap: 12px; }
+.legacy .settings form > br { display: none; }
+.legacy .settings form > button { align-self: flex-start; }
+.legacy .settingstable td { padding: 14px 16px; line-height: 1.6; overflow-wrap: anywhere; }
+.legacy .settingstable { table-layout: fixed; }
+.legacy .settingstable textarea { width: 100%; margin-top: 8px; }
+.legacy .plaintable { box-shadow: none; }
+.legacy .plaintable td { padding: 2px 8px 2px 0; border: 0; }
+.legacy dl { margin: 8px 0; }
+.legacy dt { font-weight: var(--semi); margin-top: 6px; }
+.legacy dd { margin: 0 0 4px; color: var(--muted); }
+
+/* Form controls */
+.legacy input:not([type=checkbox], [type=radio], [type=range], [type=submit], [type=button]),
+.legacy select, .legacy textarea {
+  min-height: 40px; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--bar-empty);
+  background: var(--surface); color: var(--text); font: inherit; max-width: 100%; box-shadow: none;
+}
+.legacy select[multiple] { padding: 4px; }
+.legacy textarea { min-height: 80px; }
+.legacy input[type=checkbox], .legacy input[type=radio] { width: 20px; height: 20px; margin: 0 6px 0 0; vertical-align: -4px; accent-color: var(--accent); }
+.legacy input[type=range], .legacy .slider { width: min(100%, 320px); accent-color: var(--accent); opacity: 1; background: none; height: auto; }
+
+/* Buttons: pill like .button; secondary ones (testbtn, small helpers) outlined. */
+.legacy button, .legacy input[type=submit], .legacy input[type=button] {
+  min-height: 44px; padding: 0 16px; border-radius: 999px; border: 0; background: var(--accent); color: var(--on-accent);
+  font: inherit; font-weight: var(--semi); cursor: pointer; box-shadow: none; transition: background .15s;
+}
+.legacy button:hover, .legacy input[type=submit]:hover { background: var(--accent-strong); color: var(--on-accent); }
+.legacy .testbtn, .legacy #showpassword, .legacy #newrtspstream, .legacy #modal button, .legacy .copyimage {
+  background: var(--surface) !important; color: var(--accent); border: 1px solid var(--chip-line);
+}
+.legacy select.testbtn { background: var(--surface) !important; color: var(--text); }
+.legacy #showpassword, .legacy #newrtspstream { min-height: 32px; height: auto; line-height: 1; padding: 0 10px; }
+.legacy .disabled { cursor: not-allowed; pointer-events: none; opacity: .5; }
+.legacy .float button { margin: 6px 0; }
+.legacy dialog { border: 0; border-radius: var(--radius); background: var(--surface); color: var(--text); max-width: min(92vw, 640px); }
+.legacy dialog::backdrop { background: rgba(0, 0, 0, .45); }
+
+/* Services and System controls: a card per group, buttons wrap. */
+.legacy .servicecontrols, .legacy .systemcontrols { display: flex; flex-direction: column; gap: 12px; }
+.legacy .servicecontrols form, .legacy .systemcontrols form { display: flex; flex-direction: column; gap: 12px; }
+.legacy .btn-group-center { background: var(--surface); border-radius: var(--radius); padding: 12px 14px; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; text-align: left; }
+.legacy .btn-group-center h3, .legacy .btn-group-center > span { flex-basis: 100%; margin: 0; }
+.legacy .servicecontrols button, .legacy .systemcontrols button { width: auto; margin: 0; display: inline-flex; align-items: center; }
+.legacy .systemcontrols button { width: 100%; justify-content: center; }
+@media (min-width: 600px) { .legacy .systemcontrols button { width: auto; } }
+
+/* Command output */
+.legacy pre.bash, .legacy pre { background: #0F1510; color: #DCE5D8; border-radius: 12px; padding: 12px; margin: 0; font: var(--f13)/1.45 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; width: 100%; }
+.legacy pre#timer.bash { display: inline; width: auto; padding: 2px 6px; }
+.legacy .relative { position: relative; }
+.legacy .copyimage { position: absolute; top: 6px; right: 8px; width: auto !important; height: 32px !important; min-height: 32px; padding: 0 12px; }
+
+/* Species lists (include/exclude/whitelist): two lists with add/remove between them. */
+.legacy .customlabels { float: none; width: 100%; }
+.legacy .customlabels table { height: auto; }
+.legacy .customlabels td { border: 0; vertical-align: middle; }
+.legacy .customlabels button { width: 100%; }
+.legacy .column1, .legacy .column3 { width: 45%; }
+.legacy .column2 { width: 10%; text-align: center; }
+.legacy .column1 form, .legacy .column3 form { width: 100%; display: flex; flex-direction: column; gap: 8px; }
+.legacy .column1 select, .legacy .column3 select { width: 100%; height: 50vh; }
+.legacy .smaller { display: none; width: 100%; }
+@media (max-width: 899.98px) {
+  .legacy .customlabels tr { display: flex; flex-direction: column; }
+  .legacy .column1, .legacy .column3 { width: 100%; }
+  .legacy .column2 { display: none; }
+  .legacy .smaller { display: block; }
+  .legacy .column1 select, .legacy .column3 select { height: 40vh; }
+}
+.legacy .left-column { display: none; }
+
+/* Species management */
+.legacy .centered { display: block; min-width: 0; max-width: 100%; text-align: left; }
+.legacy .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 8px; }
+.legacy .toolbar input[type=text] { flex: 1; min-width: 0; }
+.legacy #speciesTable { display: block; overflow-x: auto; max-width: 100%; }
+.legacy #speciesTable a, .legacy #speciesTable a:visited { color: var(--accent); }
+.legacy #speciesTable th { white-space: nowrap; cursor: pointer; }
+.legacy .circle-icon { border-color: var(--muted); }
+
+/* Recordings (play.php): its .play is not the v2 round play button. */
+.legacy .play { width: auto; height: auto; border-radius: 0; background: none; color: inherit; display: block; }
+.legacy audio { width: 100%; max-width: 100%; }
+
+/* Iframe tools (System info, File manager, Database, Terminal) fill the space above the tab bar. */
+.legacy .legacy-frame { position: static; display: block; width: 100%; height: calc(100dvh - 210px); min-height: 420px; border: 0; border-radius: var(--radius); background: #fff; }
+@media (min-width: 900px) { .legacy .legacy-frame { height: calc(100dvh - 220px); } }
+main:has(.legacy-frame) { max-width: 1200px; }
+body:has(.legacy-frame) .topnav-in { max-width: 1200px; }
+body:has(#speciesTable) main, body:has(#speciesTable) .topnav-in { max-width: 1200px; }

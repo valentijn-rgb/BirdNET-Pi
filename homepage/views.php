@@ -13,6 +13,10 @@ $config = get_config();
 $color_scheme = get_color_scheme();
 set_timezone();
 
+// Tool views and command output render in the v2 shell; the content views keep this old page.
+require_once __DIR__ . '/v2/inc/legacy.php';
+$v2_title = v2_legacy_title($_GET);
+
 $restore = "cat $home/BirdSongs/restore.log";
 
 if(is_authenticated() && (!isset($_SESSION['behind']) || !isset($_SESSION['behind_time']) || time() > $_SESSION['behind_time'] + 86400)) {
@@ -32,9 +36,17 @@ if(is_authenticated() && (!isset($_SESSION['behind']) || !isset($_SESSION['behin
   $_SESSION['behind'] = $num_commits_behind;
   $_SESSION['behind_time'] = time();
 }
+if ($v2_title !== null) {
+  $v2_warning = ($config["LATITUDE"] == "0.000" || $config["LONGITUDE"] == "0.000")
+    ? 'De locatie (breedte- en lengtegraad) is nog niet ingesteld. Doe dat bij Instellingen.' : '';
+  v2_legacy_start($v2_title, $v2_warning);
+  if (($_GET['view'] ?? '') === 'System Controls') {
+    echo '<script src="static/plupload.full.min.js"></script>' . "\n"; // backup upload
+  }
+} else {
 if(isset($_SESSION['behind'])&&intval($_SESSION['behind']) >= 99) {?>
   <style>
-  .updatenumber { 
+  .updatenumber {
     width:30px !important;
   }
   </style>
@@ -113,6 +125,7 @@ function copyOutput(elem) {
 
 <div class="views">
 <?php
+}
 function update_species_list($filename, $species, $add) {
     if($add){
         $str = file_get_contents($filename);
@@ -140,7 +153,7 @@ function update_species_list($filename, $species, $add) {
 }
 
 if(isset($_GET['view'])){
-  if($_GET['view'] == "System Info"){echo "<iframe src='phpsysinfo/index.php'></iframe>";}
+  if($_GET['view'] == "System Info"){echo "<iframe class='legacy-frame' src='phpsysinfo/index.php'></iframe>";}
   if($_GET['view'] == "System Controls"){
     ensure_authenticated();
     include('scripts/system_controls.php');
@@ -209,14 +222,14 @@ if(isset($_GET['view'])){
     include('scripts/species_tools.php');
   }
   if($_GET['view'] == "File"){
-    echo "<iframe src='scripts/filemanager/filemanager.php'></iframe>";
+    echo "<iframe class='legacy-frame' src='scripts/filemanager/filemanager.php'></iframe>";
   }
   if($_GET['view'] == "Adminer"){
-    echo "<iframe src='scripts/adminer.php'></iframe>";
+    echo "<iframe class='legacy-frame' src='scripts/adminer.php'></iframe>";
   }
   if($_GET['view'] == "Webterm"){
     ensure_authenticated('You cannot access the web terminal');
-    echo "<iframe src='terminal'></iframe>";
+    echo "<iframe class='legacy-frame' src='terminal'></iframe>";
   }
 } elseif(isset($_GET['submit'])) {
   ensure_authenticated();
@@ -346,6 +359,10 @@ if(isset($_GET['view'])){
     }
   ob_end_flush();
 } else {include('overview.php');}
+if ($v2_title !== null) {
+  v2_legacy_end();
+  exit;
+}
 ?>
 <script>
 function myFunction() {

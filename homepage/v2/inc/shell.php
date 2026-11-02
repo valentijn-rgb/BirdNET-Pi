@@ -60,8 +60,9 @@ function v2_asset(string $file): string
  * Starts the page: output buffer, clock, <head>, top nav, <main>.
  * $tab is the tab this page belongs to; $from (home|species|...) overrides it for pages reached
  * from another tab (species detail opened from Home). '' marks no tab (error pages).
+ * $css lists extra stylesheets in v2/ loaded after app.css (legacy.css for the old tool pages).
  */
-function v2_page_start(string $title, string $tab, string $from = ''): void
+function v2_page_start(string $title, string $tab, string $from = '', array $css = []): void
 {
     $GLOBALS['v2_t0'] ??= hrtime(true);
     $GLOBALS['v2_ob'] = ob_get_level();
@@ -84,6 +85,9 @@ function v2_page_start(string $title, string $tab, string $from = ''): void
 <link rel="apple-touch-icon" href="/v2/icon-180.png">
 <link rel="manifest" href="/v2/manifest.webmanifest">
 <link rel="stylesheet" href="<?= h(v2_asset('app.css')) ?>">
+<?php foreach ($css as $file) { ?>
+<link rel="stylesheet" href="<?= h(v2_asset($file)) ?>">
+<?php } ?>
 <script src="<?= h(v2_asset('app.js')) ?>" defer></script>
 </head>
 <body>
