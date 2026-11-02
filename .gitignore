@@ -48,3 +48,4 @@ include_species_list.txt
 whitelist_species_list.txt
 /nbproject/private/
 model/l18n/v2_labels.php
+model/BirdNET_V3.0-preview3.1_Global_11K_FP16_pruned.tflite

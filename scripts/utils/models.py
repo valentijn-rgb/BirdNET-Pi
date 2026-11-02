@@ -32,6 +32,8 @@ def get_model(model=None):
         return Perch()
     elif model == 'BirdNET-Go_classifier_20250916':
         return BirdNETGo20250916(conf.getfloat('SENSITIVITY'))
+    elif model == 'BirdNET_V3.0-preview3.1_Global_11K_FP16_pruned':
+        return BirdNetV3()
 
 
 def get_meta_model(model=None, version=None):
@@ -185,6 +187,31 @@ class Perch(Basemodel):
 
 class BirdNETGo20250916(BirdNetV2_4):
     model_name = 'BirdNET-Go_classifier_20250916'
+
+
+class BirdNetV3(Basemodel):
+    """BirdNET+ V3.0 preview: raw 32 kHz audio in, scores with the sigmoid already applied out."""
+    chunk_duration = 3
+    sample_rate = 32000
+    model_name = 'BirdNET_V3.0-preview3.1_Global_11K_FP16_pruned'
+    num_threads = 2
+
+    def __init__(self):
+        model_path = os.path.join(MODEL_PATH, f'{self.model_name}.tflite')
+        self.interpreter = tflite.Interpreter(model_path, num_threads=self.num_threads)
+        self.labels = get_model_labels(self.model_name)
+
+        self._input_layer_idx = self.interpreter.get_input_details()[0]['index']
+        self.interpreter.resize_tensor_input(self._input_layer_idx, [1, self.chunk_duration * self.sample_rate])
+        self.interpreter.allocate_tensors()
+        # two outputs (scores, embeddings): take the one with a score per label
+        self._output_layer_idx = [o['index'] for o in self.interpreter.get_output_details()
+                                  if o['shape'][-1] == len(self.labels)][0]
+
+    def predict(self, chunk):
+        self.interpreter.set_tensor(self._input_layer_idx, np.array(chunk, dtype='float32')[np.newaxis, :])
+        self.interpreter.invoke()
+        return self.label(self.interpreter.get_tensor(self._output_layer_idx)[0])
 
 
 class MDataModel:
