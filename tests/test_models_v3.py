@@ -73,6 +73,20 @@ class TestBirdNetV3(unittest.TestCase):
                 self.assertEqual(model.get_species_list(), ['Pica pica'])
 
 
+class TestMissingModelFile(unittest.TestCase):
+
+    @patch('scripts.utils.helpers._load_settings')
+    def test_missing_v3_file_falls_back_to_v24(self, mock_load_settings):
+        # choosing V3 before running install_v3_model.sh must not stop the analysis service
+        mock_load_settings.return_value = v3_settings()
+        real_exists = os.path.exists
+        with patch('scripts.utils.models.os.path.exists', side_effect=lambda p: False if V3 in p else real_exists(p)), \
+                self.assertLogs('scripts.utils.models', level='ERROR') as logs:
+            model = get_model()
+        self.assertEqual(model.model_name, 'BirdNET_GLOBAL_6K_V2.4_Model_FP16')
+        self.assertIn('install_v3_model.sh', logs.output[0])
+
+
 class TestReadAudio(unittest.TestCase):
 
     def test_recording_resamples_to_32k_without_resampy(self):

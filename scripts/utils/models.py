@@ -34,7 +34,12 @@ def get_model(model=None):
     elif model == 'BirdNET-Go_classifier_20250916':
         return BirdNETGo20250916(conf.getfloat('SENSITIVITY'))
     elif model == 'BirdNET_V3.0-preview3.1_Global_11K_FP16_pruned':
-        return BirdNetV3()
+        if os.path.exists(os.path.join(MODEL_PATH, f'{model}.tflite')):
+            return BirdNetV3()
+        # the 70 MB model is not in git; keep detecting with V2.4 instead of crash-looping all night
+        log.error('%s.tflite is missing, using BirdNET_GLOBAL_6K_V2.4_Model_FP16. '
+                  'Run scripts/install_v3_model.sh and restart birdnet_analysis.', model)
+        return BirdNetV2_4(conf.getfloat('SENSITIVITY'))
 
 
 def get_meta_model(model=None, version=None):
