@@ -108,7 +108,10 @@ def get_model_labels(model=None):
 
 def set_label_file():
     lang = get_language()
-    labels = [f'{label}_{lang[label]}\n' for label in get_model_labels()]
+    # species missing from the language file keep the model's own common name (or the sci name)
+    with open(os.path.join(MODEL_PATH, f"{get_settings()['MODEL']}_Labels.txt")) as f:
+        own = dict((line.strip().split('_', 1) + [''])[:2] for line in f if line.strip())
+    labels = [f'{label}_{lang.get(label) or own.get(label) or label}\n' for label in get_model_labels()]
     file_name = os.path.join(MODEL_PATH, 'labels.txt')
     if os.path.islink(file_name):
         os.remove(file_name)

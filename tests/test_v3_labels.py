@@ -1,6 +1,12 @@
+import json
+import os
+import tempfile
 import unittest
+from unittest.mock import patch
 
+from scripts.utils.helpers import set_label_file
 from scripts.v3_make_labels import make_labels
+from tests.helpers import Settings
 
 
 def row(sci, com):
@@ -39,6 +45,25 @@ class TestMakeLabels(unittest.TestCase):
         rows = [row('Anas carolinensis', 'Teal'), row('Anas crecca', 'Eurasian Teal')]
         lines = make_labels(rows, ['Anas crecca'], {'Anas crecca': 'Teal'}, {})
         self.assertEqual(lines, ['Anas carolinensis_Teal', 'Anas crecca_Teal'])
+
+
+class TestSetLabelFile(unittest.TestCase):
+
+    @patch('scripts.utils.helpers._load_settings')
+    def test_set_label_file_falls_back_to_model_name(self, mock_load_settings):
+        settings = Settings.with_defaults()
+        settings['MODEL'] = 'Test_Model'
+        mock_load_settings.return_value = settings
+        with tempfile.TemporaryDirectory() as model_path:
+            os.mkdir(os.path.join(model_path, 'l18n'))
+            with open(os.path.join(model_path, 'Test_Model_Labels.txt'), 'w') as f:
+                f.write('Corvus monedula_Eurasian Jackdaw\nNewus speciesus_New Bird\n')
+            with open(os.path.join(model_path, 'l18n', 'labels_en.json'), 'w') as f:
+                json.dump({'Corvus monedula': 'Western Jackdaw'}, f)
+            with patch('scripts.utils.helpers.MODEL_PATH', model_path):
+                set_label_file()
+            with open(os.path.join(model_path, 'labels.txt')) as f:
+                self.assertEqual(f.read().splitlines(), ['Corvus monedula_Western Jackdaw', 'Newus speciesus_New Bird'])
 
 
 if __name__ == '__main__':
