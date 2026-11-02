@@ -267,7 +267,7 @@ function sendTestNotification(e) {
       <label for="model">Select a Model: </label>
       <select id="modelsel" name="model" class="testbtn">
       <?php
-      $models = array("BirdNET_GLOBAL_6K_V2.4_Model_FP16", "BirdNET_6K_GLOBAL_MODEL");
+      $models = array("BirdNET_GLOBAL_6K_V2.4_Model_FP16", "BirdNET_V3.0-preview3.1_Global_11K_FP16_pruned", "BirdNET_6K_GLOBAL_MODEL");
       foreach($models as $modelName){
           $isSelected = "";
           if($config['MODEL'] == $modelName){
@@ -279,7 +279,7 @@ function sendTestNotification(e) {
       ?>
       </select>
       <br>
-      <span <?php if($config['MODEL'] == "BirdNET_6K_GLOBAL_MODEL") { ?>style="display: none"<?php } ?> id="soft">
+      <span <?php if($config['MODEL'] != "BirdNET_GLOBAL_6K_V2.4_Model_FP16") { ?>style="display: none"<?php } ?> id="soft">
       <input type="checkbox" name="data_model_version" <?php if($config['DATA_MODEL_VERSION'] == 2) { echo "checked"; };?> >
       <label for="data_model_version">Species range model V2.4 - V2</label>  [ <a target="_blank" href="https://github.com/kahst/BirdNET-Analyzer/discussions/234">Info here</a> ]<br>
       <label for="sf_thresh">Species Occurrence Frequency Threshold [0.0005, 0.99]: </label>
@@ -386,6 +386,10 @@ function runProcess() {
       <dt>BirdNET_GLOBAL_6K_V2.4_Model_FP16 (2023)</dt>
       <br>
       <dd id="ddnewline">This is the BirdNET-Analyzer model, the most advanced BirdNET model to date. Currently it  supports over 6,000 species worldwide, giving quite good species coverage for people in most of the world.</dd>
+      <br>
+      <dt>BirdNET_V3.0-preview3.1_Global_11K_FP16_pruned (2026)</dt>
+      <br>
+      <dd id="ddnewline">BirdNET+ V3.0 developer preview: about 11,000 species including insects, frogs and mammals. Uses a built-in species list for Rotterdam (made from the V3 geomodel), so the species range settings above do not apply. Sensitivity has no effect. Download it first with scripts/install_v3_model.sh.</dd>
       <br>
       <dt>BirdNET_6K_GLOBAL_MODEL (2020)</dt>
       <br>

@@ -103,7 +103,8 @@ def filter_humans(predictions):
     human_mask = [False] * len(predictions)
     for i, prediction in enumerate(predictions):
         for p in prediction[:human_cutoff]:
-            if 'Human' in p[0]:
+            # V2.4: 'Human vocal', 'Human non-vocal', ...; V3: 'Homo sapiens' ("human")
+            if 'Human' in p[0] or p[0].lower().startswith('homo '):
                 human_mask[i] = True
                 break
 

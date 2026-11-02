@@ -194,6 +194,25 @@ class TestFilterHumans(unittest.TestCase):
         # Assertions
         self.assertEqual(result, expected)
 
+    @patch('scripts.utils.helpers._load_settings')
+    def test_v3_human_classes_are_masked(self, mock_load_settings):
+        mock_load_settings.return_value = Settings.with_defaults()
+
+        for human in ('Homo Sapiens', 'Homo sapiens'):
+            detections = [
+                [('Pica pica', 0.9)],
+                [(human, 0.8)],
+                [('Pica pica', 0.9)],
+                [('Corvus corone', 0.9)]
+            ]
+            expected = [
+                [('Human_Human', 0.0)],
+                [('Human_Human', 0.0)],
+                [('Human_Human', 0.0)],
+                [('Corvus corone', 0.9)]
+            ]
+            self.assertEqual(filter_humans(detections), expected)
+
 
 if __name__ == '__main__':
     unittest.main()
