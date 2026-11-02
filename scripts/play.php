@@ -7,6 +7,7 @@ $_POST  = filter_input_array(INPUT_POST, FILTER_SANITIZE_STRING);
 error_reporting(E_ERROR);
 ini_set('display_errors',1);
 require_once 'scripts/common.php';
+require_once __DIR__ . '/v2_queries.php';
 $home = get_home();
 $config = get_config();
 $user = get_user();
@@ -21,12 +22,12 @@ if(isset($_GET['deletefile'])) {
     die();
   }
   $db_writable = new SQLite3('./scripts/birds.db', SQLITE3_OPEN_READWRITE);
-  $db->busyTimeout(1000);
+  $db_writable->busyTimeout(1000);
   $statement1 = $db_writable->prepare('DELETE FROM detections WHERE File_Name = :file_name LIMIT 1');
   ensure_db_ok($statement1);
   $statement1->bindValue(':file_name', explode("/", $_GET['deletefile'])[2]);
   $file_pointer = $home."/BirdSongs/Extracted/By_Date/".$_GET['deletefile'];
-  if (!exec("sudo rm $file_pointer 2>&1 && sudo rm $file_pointer.png 2>&1", $output)) {
+  if (!exec("sudo rm ".escapeshellarg($file_pointer)." 2>&1 && sudo rm ".escapeshellarg($file_pointer.".png")." 2>&1", $output)) {
     echo "OK";
   } else {
     echo "Error - file deletion failed : " . implode(", ", $output) . "<br>";
@@ -36,6 +37,7 @@ if(isset($_GET['deletefile'])) {
     echo "Error - database line deletion failed : " . $db_writable->lastErrorMsg();
   }
   $db_writable->close();
+  v2_cache_drop();
   die();
 }
 
@@ -82,11 +84,12 @@ if(isset($_GET['changefile']) && isset($_GET['newname'])) {
   }
   $oldname = basename(urldecode($_GET['changefile']));
   $newname = urldecode($_GET['newname']);
-  if (!exec("sudo -u ".$user." ".$home."/BirdNET-Pi/scripts/birdnet_changeidentification.sh \"$oldname\" \"$newname\" log_errors 2>&1", $output)) {
+  if (!exec("sudo -u ".escapeshellarg($user)." ".escapeshellarg($home."/BirdNET-Pi/scripts/birdnet_changeidentification.sh")." ".escapeshellarg($oldname)." ".escapeshellarg($newname)." log_errors 2>&1", $output)) {
     echo "OK";
   } else {
     echo "Error : " . implode(", ", $output) . "<br>";
   }
+  v2_cache_drop(true);
   die();
 }
 

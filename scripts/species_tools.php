@@ -4,6 +4,7 @@ $_GET  = filter_input_array(INPUT_GET, FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: []
 $_POST = filter_input_array(INPUT_POST, FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: [];
 
 require_once __DIR__ . '/common.php';
+require_once __DIR__ . '/v2_queries.php';
 ensure_authenticated();
 
 $home = get_home();
@@ -132,6 +133,7 @@ if (isset($_GET['delete'])) {
   $del->bindValue(':name', $species, SQLITE3_TEXT);
   $del->execute();
   $lines_deleted = $db->changes();
+  v2_cache_drop();
 
   if ($info['sci'] !== null && file_exists($confirm_file)) {
     $identifier = $info['sci'];

@@ -766,13 +766,35 @@ const V2_SPECIES_CACHE = 'species-all';
 const V2_SPECIES_REBUILD_S = 3600;
 
 /**
+ * Drops the cached data that misses a deleted or edited row, so the next request rebuilds it:
+ * the species cache (its incremental step only sees new rowids) and, with $sessions, every
+ * finished session's card and data (keyed by count + max rowid, which an edit in place keeps; a
+ * delete changes the count, so those rebuild by themselves). Called by the legacy pages that
+ * delete detections (play.php, species_tools.php) or change one (play.php changefile).
+ */
+function v2_cache_drop(bool $sessions = false): void
+{
+    @unlink(v2_cache_file(V2_SPECIES_CACHE));
+    if ($sessions) {
+        $files = array_merge(
+            glob(v2_cache_dir() . '/session-*.json') ?: [],
+            glob(v2_cache_dir() . '/window-*.json') ?: [],
+            glob(v2_state_dir() . '/sessions/*.json') ?: [],
+        );
+        foreach ($files as $f) {
+            @unlink($f);
+        }
+    }
+}
+
+/**
  * Per-species totals keyed by Sci_Name: n, first/last ('Y-m-d H:i:s'), d30 (detections per day
  * for the last 30 days, oldest first, today last) and names. Kept in one cache entry with the
  * DB path, the max rowid it covers, its day and build time:
  * - other day, older than V2_SPECIES_REBUILD_S, or MAX(rowid) went down → full rebuild;
  * - MAX(rowid) went up → only rows in (cached max, MAX(rowid)] are aggregated and merged in;
  * - otherwise a plain hit. Each request costs one O(1) MAX(rowid) query plus the file read.
- * Deleted rows stay counted until the next full rebuild.
+ * Deleted rows stay counted until the next full rebuild, unless the delete ran v2_cache_drop().
  * @return array<string, array{sci:string, n:int, first:string, last:string, d30:list<int>, names:array}>
  */
 function v2_species_index(): array
@@ -909,7 +931,7 @@ function v2_species_sort(array $rows, string $sort, string $dir): array
 
 /**
  * Totals of one species from the species cache (no query of its own; like the Soorten list,
- * deleted rows count until the cache's next full rebuild).
+ * rows deleted outside the web UI count until the cache's next full rebuild).
  * @return ?array{sci:string, n:int, first:string, last:string, names:array} null when never heard
  */
 function v2_species_detail(string $sci): ?array
