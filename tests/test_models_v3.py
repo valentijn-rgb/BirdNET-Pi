@@ -61,6 +61,17 @@ class TestBirdNetV3(unittest.TestCase):
         self.assertTrue(all(len(c) == 96000 for c in chunks))
 
     @patch('scripts.utils.helpers._load_settings')
+    def test_v3_skips_xnnpack(self, mock_load_settings):
+        # XNNPACK expands the FP16 weights: 696 MB peak on the Pi (it reset the Pi next to V2.4) vs 392 MB without
+        from scripts.utils import models
+        mock_load_settings.return_value = v3_settings()
+        with patch.object(models.tflite, 'Interpreter', wraps=models.tflite.Interpreter) as interpreter:
+            get_model()
+        self.assertEqual(interpreter.call_args.kwargs.get('experimental_op_resolver_type'),
+                         models.tflite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
+                         if hasattr(models.tflite, 'experimental') else models.tflite.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES)
+
+    @patch('scripts.utils.helpers._load_settings')
     def test_species_list_for_week(self, mock_load_settings):
         mock_load_settings.return_value = v3_settings()
         model = get_model()

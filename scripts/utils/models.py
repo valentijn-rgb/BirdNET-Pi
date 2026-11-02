@@ -204,7 +204,10 @@ class BirdNetV3(Basemodel):
 
     def __init__(self):
         model_path = os.path.join(MODEL_PATH, f'{self.model_name}.tflite')
-        self.interpreter = tflite.Interpreter(model_path, num_threads=self.num_threads)
+        # no XNNPACK: it expands the FP16 weights to FP32, 696 MB peak on the Pi 3 vs 392 MB (7.9 s per 15 s)
+        resolver = getattr(tflite, 'OpResolverType', None) or tflite.experimental.OpResolverType
+        self.interpreter = tflite.Interpreter(model_path, num_threads=self.num_threads,
+                                              experimental_op_resolver_type=resolver.BUILTIN_WITHOUT_DEFAULT_DELEGATES)
         self.labels = get_model_labels(self.model_name)
 
         self._input_layer_idx = self.interpreter.get_input_details()[0]['index']
