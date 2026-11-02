@@ -195,6 +195,19 @@ class TestFilterHumans(unittest.TestCase):
         self.assertEqual(result, expected)
 
     @patch('scripts.utils.helpers._load_settings')
+    @patch('scripts.utils.analysis.loadCustomSpeciesList', return_value=[])
+    @patch('scripts.utils.analysis.readAudioData', return_value=[])
+    @patch('scripts.utils.analysis.analyzeAudioData', return_value=({'0.0;3.0': [('Alle alle', 0.9)]}, []))
+    def test_species_without_english_name_get_model_name(self, _analyze, _read, _lists, mock_load_settings):
+        # 'Alle alle' is a V3 output with no entry in labels_en.json; the DB must get 'Little Auk'
+        settings = Settings.with_defaults()
+        settings['MODEL'] = 'BirdNET_V3.0-preview3.1_Global_11K_FP16_pruned'
+        mock_load_settings.return_value = settings
+        with patch('scripts.utils.analysis.load_global_model'):
+            detections = run_analysis(ParseFileName('/tmp/2026-11-02-birdnet-15:41:10.wav'))
+        self.assertEqual([(d.scientific_name, d.common_name) for d in detections], [('Alle alle', 'Little Auk')])
+
+    @patch('scripts.utils.helpers._load_settings')
     def test_v3_human_classes_are_masked(self, mock_load_settings):
         mock_load_settings.return_value = Settings.with_defaults()
 

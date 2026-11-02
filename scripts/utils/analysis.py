@@ -6,7 +6,7 @@ import librosa
 import numpy as np
 
 from .classes import Detection, ParseFileName
-from .helpers import get_settings, get_language
+from .helpers import get_settings, get_names
 from .models import get_model
 
 log = logging.getLogger(__name__)
@@ -146,7 +146,7 @@ def run_analysis(file):
 
     conf = get_settings()
     model = load_global_model()
-    names = get_language(conf['DATABASE_LANG'])
+    names = get_names(conf['DATABASE_LANG'])
 
     # Read audio data & handle errors
     try:

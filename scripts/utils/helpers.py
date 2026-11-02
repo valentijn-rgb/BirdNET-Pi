@@ -106,12 +106,23 @@ def get_model_labels(model=None):
     return labels
 
 
+def get_model_names(model=None):
+    """Common names from the model's own 'Sci_Common' labels file (empty for sci-only files like V2.4's)."""
+    if model is None:
+        model = get_settings()['MODEL']
+    with open(os.path.join(MODEL_PATH, f'{model}_Labels.txt')) as f:
+        pairs = [line.strip().split('_', 1) for line in f if line.strip()]
+    return {p[0]: p[1] for p in pairs if len(p) == 2 and p[1]}
+
+
+def get_names(language=None):
+    """Common names in the given language, falling back to the model's own names (species new in V3)."""
+    return {**get_model_names(), **get_language(language)}
+
+
 def set_label_file():
-    lang = get_language()
-    # species missing from the language file keep the model's own common name (or the sci name)
-    with open(os.path.join(MODEL_PATH, f"{get_settings()['MODEL']}_Labels.txt")) as f:
-        own = dict((line.strip().split('_', 1) + [''])[:2] for line in f if line.strip())
-    labels = [f'{label}_{lang.get(label) or own.get(label) or label}\n' for label in get_model_labels()]
+    names = get_names()
+    labels = [f'{label}_{names.get(label, label)}\n' for label in get_model_labels()]
     file_name = os.path.join(MODEL_PATH, 'labels.txt')
     if os.path.islink(file_name):
         os.remove(file_name)
