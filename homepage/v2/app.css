@@ -10,9 +10,23 @@
   --bold: 700; --semi: 600;
   color-scheme: light dark;
 }
-/* Dark: light sizes; text grayscale-antialiased, a notch lighter and off-white (reads less heavy). */
+/* Dark: light sizes; text grayscale-antialiased, a notch lighter and off-white (reads less heavy).
+   The v2_theme cookie (Tools > Weergave) sets data-theme on <html>: dark forces this block, light
+   forces the tokens above, none follows the system. CSS cannot share one block between a media query
+   and a plain selector, so the two blocks below must hold identical values: edit both. */
+:root[data-theme=light] { color-scheme: light; }
+:root[data-theme=dark] {
+  color-scheme: dark;
+  --bold: 650; --semi: 550;
+  --bg: #121813; --surface: #1B241D; --text: #DCE5D8; --muted: #A9B8AC;
+  --accent: #9FC59A; --accent-strong: #C3DEBF; --on-accent: #121813;
+  --bar: #7FB077; --bar-empty: #5D6E61; --line: #2A352C; --nav-line: #2A352C;
+  --chip: #26352A; --chip-text: #C3DEBF; --chip-line: #7A8C7E; --sel: #223026;
+  --warn: #F2A27A; --on-warn: #121813; --ok: #9FC59A; --err: #F59B8F;
+}
+:root[data-theme=dark] body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme=light]) {
     --bold: 650; --semi: 550;
     --bg: #121813; --surface: #1B241D; --text: #DCE5D8; --muted: #A9B8AC;
     --accent: #9FC59A; --accent-strong: #C3DEBF; --on-accent: #121813;
@@ -20,7 +34,7 @@
     --chip: #26352A; --chip-text: #C3DEBF; --chip-line: #7A8C7E; --sel: #223026;
     --warn: #F2A27A; --on-warn: #121813; --ok: #9FC59A; --err: #F59B8F;
   }
-  body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  :root:not([data-theme=light]) body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -92,6 +106,12 @@ main:has(> .tools) { gap: 12px; }
 .photo { width: 56px; height: 56px; border-radius: 12px; object-fit: cover; background: var(--chip); display: block; }
 .photo.hero { width: 100%; height: 200px; border-radius: 0; }
 .placeholder { display: flex; align-items: center; justify-content: center; color: var(--chip-text); font-size: var(--f20); font-weight: var(--bold); }
+
+/* Theme switch (Tools > Weergave): three-segment pill, the chosen one filled with the accent */
+.theme-switch { display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--chip); }
+.theme-switch button { flex: 1; min-height: 44px; border: 0; border-radius: 999px; background: none; color: var(--chip-text); font-weight: var(--semi); cursor: pointer; }
+.theme-switch button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
+.theme-switch button:not([aria-pressed=true]):hover { background: var(--sel); }
 
 /* Buttons */
 .button { min-height: 44px; padding: 0 14px; border-radius: 999px; border: 0; background: var(--accent); color: var(--on-accent); font-weight: var(--semi); display: inline-flex; align-items: center; justify-content: center; text-decoration: none; cursor: pointer; }

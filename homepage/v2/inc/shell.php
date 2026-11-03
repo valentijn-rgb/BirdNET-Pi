@@ -56,6 +56,13 @@ function v2_asset(string $file): string
     return '/v2/' . $file . '?v=' . (@filemtime(dirname(__DIR__) . '/' . $file) ?: 0);
 }
 
+/** The chosen theme from the v2_theme cookie: 'light', 'dark', or '' (follow the system; anything else too). */
+function v2_theme(): string
+{
+    $t = $_COOKIE['v2_theme'] ?? '';
+    return $t === 'light' || $t === 'dark' ? $t : '';
+}
+
 /**
  * Starts the page: output buffer, clock, <head>, top nav, <main>.
  * $tab is the tab this page belongs to; $from (home|species|...) overrides it for pages reached
@@ -70,13 +77,14 @@ function v2_page_start(string $title, string $tab, string $from = '', array $css
     v2_tz();
     $GLOBALS['v2_tab'] = isset(V2_TABS[$from]) ? $from : $tab;
     $brand = V2_TABS['species'][2];
+    $theme = v2_theme();
     ?>
 <!doctype html>
-<html lang="nl">
+<html lang="nl"<?= $theme !== '' ? ' data-theme="' . $theme . '"' : '' ?>>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="<?= $theme !== '' ? $theme : 'light dark' ?>">
 <meta name="theme-color" content="#2F5E2B">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Vogels">

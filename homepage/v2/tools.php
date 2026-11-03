@@ -21,7 +21,42 @@ const V2_SYSTEM = [
     ['Afsluiten…', 'De Pi blijft uit tot de stroom opnieuw wordt aangesloten.', 'sudo shutdown now', 'Ja, sluit af'],
 ];
 
+const V2_THEMES = [
+    'light' => 'Licht',
+    'dark' => 'Donker',
+    'system' => 'Systeem',
+];
+const V2_THEME_NOTES = [
+    'light' => 'Altijd licht op dit apparaat.',
+    'dark' => 'Altijd donker op dit apparaat.',
+    'system' => 'Volgt je telefoon of computer.',
+];
+
+/** POST theme=light|dark|system: remember the choice in a year-long cookie (system clears it), back to Tools. */
+function v2_set_theme(): never
+{
+    $t = $_POST['theme'] ?? null;
+    if (!is_string($t) || !isset(V2_THEMES[$t])) {
+        http_response_code(400);
+        header('Content-Type: text/plain; charset=utf-8');
+        exit("Onbekend thema.\n");
+    }
+    $opts = ['path' => '/', 'samesite' => 'Lax'];
+    if ($t === 'system') {
+        setcookie('v2_theme', '', ['expires' => 1] + $opts);
+    } else {
+        setcookie('v2_theme', $t, ['expires' => time() + 31536000] + $opts);
+    }
+    header('Location: /v2/tools.php', true, 303);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    v2_set_theme();
+}
+
 v2_guard(function (): void {
+    $theme = v2_theme() ?: 'system';
     $host = gethostname() ?: 'birds';
     v2_page_start('Tools', 'tools');
     ?>
@@ -29,6 +64,15 @@ v2_guard(function (): void {
 <h1>Tools</h1>
 <p class="muted">Station <?= h($host) ?>.local</p>
 </header>
+<section class="card" aria-labelledby="weergave">
+<h2 id="weergave"><?= v2_icon('M12 3a9 9 0 1 0 9 9c0-.5-.5-1-1-1-4 1-8-3-7-7 0-.5-.5-1-1-1', 18, 2) ?>Weergave</h2>
+<form class="theme-switch" method="post" action="/v2/tools.php">
+<?php foreach (V2_THEMES as $value => $label) { ?>
+<button name="theme" value="<?= h($value) ?>" aria-pressed="<?= $value === $theme ? 'true' : 'false' ?>"><?= h($label) ?></button>
+<?php } ?>
+</form>
+<p class="small muted"><?= h(V2_THEME_NOTES[$theme]) ?></p>
+</section>
 <div class="tools">
 <?php foreach (V2_TOOLS as [$name, $desc, $href, $icon]) { ?>
 <a class="tool" href="<?= h($href) ?>"><span class="tool-icon"><?= v2_icon($icon, 18) ?></span><span class="tool-text"><span class="tool-name"><?= h($name) ?></span><span class="tool-desc"><?= h($desc) ?></span></span></a>
