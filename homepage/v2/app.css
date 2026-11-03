@@ -197,7 +197,7 @@ table.list.home td.when, table.list.home td.count { display: none; }
 .lookout .row:not(.found) { padding-top: 12px; padding-bottom: 12px; }
 .lookout .row-text { gap: 4px; }
 .lookout .row-sub { display: flex; align-items: center; gap: 6px; }
-.lookout .chip.tag { background: transparent; border: 0; box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--muted); font-weight: 500; }
+.lookout .chip.tag, .detail .chip.tag { background: transparent; border: 0; box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--muted); font-weight: 500; }
 .dots { display: inline-flex; gap: 3px; align-items: center; flex: none; }
 .dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--bar); box-sizing: border-box; }
 .dot.on { background: var(--bar); }
@@ -264,6 +264,14 @@ body:has(.species-page) main, body:has(.species-page) .topnav-in { max-width: 12
 .detail .chart { gap: 8px; padding: 14px; }
 .hours .bars { height: 72px; }
 .days .bars { height: 56px; }
+.year .bars { height: 72px; }
+.year .bars .bar { fill: var(--bar-soft, var(--bar)); opacity: .6; }
+.year .bars .bar-now { fill: var(--bar); opacity: 1; }
+.year .bars .bar-empty.bar-now { fill: var(--text); opacity: 1; }
+.chance { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.chance strong { color: var(--text); }
+.fact-card h2, .recs-empty h2 { font-size: var(--f17); font-weight: var(--bold); display: flex; align-items: center; gap: 8px; }
+.fact-card h2 svg { flex: none; color: var(--accent); }
 .bars.spark { width: 120px; height: 24px; }
 .bars.spark path { fill: none; }
 .spark .bar { stroke: var(--bar); }
@@ -331,6 +339,9 @@ body:has(.species-page) main, body:has(.species-page) .topnav-in { max-width: 12
   .detail .fig-title, .detail .recs-box > summary h2 { font-size: var(--f15); }
   .detail .hours .bars { height: 64px; }
   .detail .days .bars { height: 48px; }
+  .detail .year .bars { height: 56px; }
+  .detail .fact-card, .detail .recs-empty { padding: 0; background: none; border-radius: 0; gap: 6px; }
+  .detail .fact-card h2, .detail .recs-empty h2 { font-size: var(--f15); }
   /* Flat recording rows */
   .detail .recs { gap: 4px; }
   .detail .rec-list { border-radius: 0; overflow: visible; }

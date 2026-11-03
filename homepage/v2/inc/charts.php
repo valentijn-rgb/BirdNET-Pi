@@ -103,3 +103,60 @@ function v2_aria_join(array $parts, int $total, string $rest): string
     }
     return implode(', ', $parts);
 }
+
+/**
+ * Likelihood through the year: one bar per geomodel week (48), 0..1 on a fixed scale (so a bird
+ * that is never likely stays flat), the current week ($gweek, 1-48) dark (`bar-now`). Zero weeks
+ * are the same 2-unit stubs as v2_bars_svg().
+ * @param list<float|int> $weeks48
+ */
+function v2_year_svg(array $weeks48, int $gweek, string $aria): string
+{
+    $weeks48 = array_values($weeks48);
+    $height = 40;
+    $rects = '';
+    for ($i = 0; $i < 48; $i++) {
+        $v = max(0.0, min(1.0, (float) ($weeks48[$i] ?? 0)));
+        $x = $i * 10 + 1;
+        $now = $i + 1 === $gweek ? ' bar-now' : '';
+        if ($v < 0.005) {
+            $rects .= '<rect class="bar-empty' . $now . '" x="' . $x . '" y="' . ($height - 2) . '" width="8" height="2"/>';
+            continue;
+        }
+        $h = max(2, (int) round($v * $height));
+        $rects .= '<rect class="bar' . $now . '" x="' . $x . '" y="' . ($height - $h) . '" width="8" height="' . $h . '"/>';
+    }
+    return '<svg class="bars year-bars" viewBox="0 0 480 ' . $height . '" preserveAspectRatio="none" role="img" aria-label="'
+        . h($aria) . '">' . $rects . '</svg>';
+}
+
+/** "Kans per week: hoog van november tot maart, laag de rest van het jaar" from 48 weekly scores (month m = weeks 4m-3..4m). */
+function v2_year_aria(array $weeks48): string
+{
+    $weeks48 = array_values($weeks48);
+    $high = [];
+    for ($m = 0; $m < 12; $m++) {
+        $max = 0.0;
+        for ($w = 4 * $m; $w < 4 * $m + 4; $w++) {
+            $max = max($max, (float) ($weeks48[$w] ?? 0));
+        }
+        $high[$m] = $max >= 0.5;
+    }
+    if (!in_array(true, $high, true)) {
+        return 'Kans per week: het hele jaar laag';
+    }
+    if (!in_array(false, $high, true)) {
+        return 'Kans per week: het hele jaar hoog';
+    }
+    $runs = [];
+    for ($m = 0; $m < 12; $m++) {
+        if ($high[$m]) {
+            $start = $m;
+            while ($m + 1 < 12 && $high[$m + 1]) {
+                $m++;
+            }
+            $runs[] = $start === $m ? V2_MONTHS_LONG[$m] : 'van ' . V2_MONTHS_LONG[$start] . ' tot ' . V2_MONTHS_LONG[$m];
+        }
+    }
+    return 'Kans per week: hoog ' . implode(' en ', $runs) . ', laag de rest van het jaar';
+}

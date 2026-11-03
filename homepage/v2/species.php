@@ -3,6 +3,7 @@
 // (?sci=) beside the table from 900 px up, or as its own page on a phone.
 require __DIR__ . '/inc/shell.php';
 require __DIR__ . '/inc/charts.php';
+require __DIR__ . '/inc/lookout_view.php';
 
 /** Sortable columns in table order: key => [label, default dir]. */
 const V2_SPECIES_COLS = [
@@ -18,6 +19,7 @@ const V2_SPECIES_MENU = ['total' => 'Meest gehoord', 'last' => 'Laatst gehoord',
 
 const V2_BACK = 'M15 18l-6-6 6-6';
 const V2_CHEVRON = 'M9 6l6 6-6 6';
+const V2_BULB = ['M9 18h6', 'M10 22h4', 'M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V17h6v-.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z'];
 const V2_SORT_NONE = ['M8 9l4-4 4 4', 'M16 15l-4 4-4-4'];
 const V2_SORT_ASC = ['M12 19V5', 'M5 12l7-7 7 7'];
 const V2_SORT_DESC = ['M12 5v14', 'M19 12l-7 7-7-7'];
@@ -78,15 +80,26 @@ v2_guard(function (): void {
     $detail = null;
     if ($sci !== null) {
         $detail = v2_species_detail($sci);
+        $weeks48 = v2_scores()[$sci] ?? null;
+        $gweek = v2_week48((int) $now->format('W'));
+        $never = false;
         if ($detail === null) {
-            v2_error_page(404, 'Soort niet gevonden', 'Deze soort is hier nog niet gehoord.');
+            // Not heard here yet: the page still exists for birds the geomodel expects (no recordings to query).
+            if (!is_array($weeks48)) {
+                v2_error_page(404, 'Soort niet gevonden', 'Deze soort is hier nog niet gehoord.');
+            }
+            $never = true;
+            $detail = ['sci' => $sci, 'n' => 0, 'first' => '', 'last' => '', 'names' => v2_names($sci)];
+        } else {
+            $since = v2_session_start();
+            $sinceStr = $since->setTimezone(new DateTimeZone(v2_tz()))->format('Y-m-d H:i:s');
+            $hours = v2_session_hours($since, $sci);
+            $sessionN = array_sum($hours); // the same session rows, so no separate count query
+            $days = v2_species_days($sci, 30);
+            $recs = v2_species_recordings($sci, 1, V2_RECENT_RECS);
         }
-        $since = v2_session_start();
-        $sinceStr = $since->setTimezone(new DateTimeZone(v2_tz()))->format('Y-m-d H:i:s');
-        $hours = v2_session_hours($since, $sci);
-        $sessionN = array_sum($hours); // the same session rows, so no separate count query
-        $days = v2_species_days($sci, 30);
-        $recs = v2_species_recordings($sci, 1, V2_RECENT_RECS);
+        $fact = v2_facts()[$sci] ?? null;
+        $fact = is_string($fact) && trim($fact) !== '' ? $fact : null;
     }
 
     // Sort and list page, kept by row links and the back link.
@@ -174,12 +187,19 @@ foreach ($shown as $r) {
         'sessions' => '/v2/sessions.php' . ($boot !== null ? '?boot=' . $boot : ''),
         default => v2_species_url($base),
     };
-    $dayKeys = array_keys($days);
-    $note = v2_station_note($all, $now);
-    $nRecs = count($recs['rows']);
-    $groups = [];
-    foreach ($recs['rows'] as $rec) {
-        $groups[$rec['Date']][] = $rec;
+    if (!$never) {
+        $dayKeys = array_keys($days);
+        $note = v2_station_note($all, $now);
+        $nRecs = count($recs['rows']);
+        $groups = [];
+        foreach ($recs['rows'] as $rec) {
+            $groups[$rec['Date']][] = $rec;
+        }
+    } else {
+        $score = (float) ($weeks48[$gweek - 1] ?? 0);
+        $dots = v2_dots($score);
+        $chance = v2_dots_word($dots) ?: 'Niet te verwachten';
+        $why = v2_why_now($weeks48, $gweek);
     }
     ?>
 <aside id="detail" class="detail" aria-labelledby="detail-name">
@@ -189,10 +209,34 @@ foreach ($shown as $r) {
 </div>
 <div class="detail-body">
 <header class="page-head">
-<div class="title"><h1 id="detail-name"><?= h($nl) ?></h1><?php if ($detail['first'] >= $sinceStr) { ?><span class="chip">Nieuw</span><?php } ?></div>
+<div class="title"><h1 id="detail-name"><?= h($nl) ?></h1><?php if ($never) { ?><span class="chip tag">Nog niet gehoord</span><?php } elseif ($detail['first'] >= $sinceStr) { ?><span class="chip">Nieuw</span><?php } ?></div>
 <p class="muted"><?= h($detail['names']['en']) ?> · <i><?= h($sci) ?></i></p>
+<?php if ($never) { ?>
+<p class="chance muted"><?= v2_dots_html($dots) ?><strong><?= h($chance) ?></strong> deze week<?php if ($why !== '') { ?> · <span class="chip tag"><?= h($why) ?></span><?php } ?></p>
+<?php } else { ?>
 <p class="stats muted"><strong><?= h(v2_fmt_int($sessionN)) ?>×</strong> deze sessie · <strong><?= h(v2_fmt_int($detail['n'])) ?>×</strong> totaal · eerst <?= h(v2_when_str($detail['first'], $now)) ?> · laatst <?= h(v2_when_str($detail['last'], $now)) ?></p>
+<?php } ?>
 </header>
+<?php if ($fact !== null) { ?>
+<section class="card fact-card" aria-labelledby="fact-h">
+<h2 id="fact-h"><?= v2_icon(V2_BULB, 20, 2) ?>Wist je dat?</h2>
+<p><?= h($fact) ?></p>
+</section>
+<?php } ?>
+<?php if (is_array($weeks48)) { ?>
+<figure class="card chart year">
+<figcaption class="fig-title">Kans door het jaar · Rotterdam</figcaption>
+<?= v2_year_svg($weeks48, $gweek, v2_year_aria($weeks48)) ?>
+<div class="axis" aria-hidden="true"><span>jan</span><span>apr</span><span>jul</span><span>okt</span><span>dec</span></div>
+<p class="small muted">Donkere balk: deze week. Bron: BirdNET+ geomodel V3.</p>
+</figure>
+<?php } ?>
+<?php if ($never) { ?>
+<section class="card recs-empty" aria-labelledby="recs-h">
+<h2 id="recs-h">Opnames</h2>
+<p class="muted">Nog niet gehoord. Zodra je mic hem vangt, staan hier de opnames.</p>
+</section>
+<?php } else { ?>
 <figure class="card chart hours">
 <figcaption class="fig-title">Per uur · deze sessie</figcaption>
 <?= v2_bars_svg($hours, 'Per uur deze sessie: ' . lcfirst(v2_hours_aria($hours))) ?>
@@ -234,6 +278,7 @@ foreach ($shown as $r) {
 <p class="rec-count small muted"><?= h(v2_fmt_int($nRecs)) ?> van <?= h(v2_fmt_int($detail['n'])) ?> opnames</p>
 </details>
 </section>
+<?php } ?>
 </div>
 </aside>
 <?php } ?>
