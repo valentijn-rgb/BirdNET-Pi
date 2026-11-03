@@ -228,7 +228,7 @@ foreach ($shown as $r) {
 <figcaption class="fig-title">Kans door het jaar · Rotterdam</figcaption>
 <?= v2_year_svg($weeks48, $gweek, v2_year_aria($weeks48)) ?>
 <div class="axis" aria-hidden="true"><span>jan</span><span>apr</span><span>jul</span><span>okt</span><span>dec</span></div>
-<p class="small muted">Donkere balk: deze week. Bron: BirdNET+ geomodel V3.</p>
+<p class="small muted">Gemarkeerde balk: deze week. Bron: BirdNET+ geomodel V3.</p>
 </figure>
 <?php } ?>
 <?php if ($never) { ?>

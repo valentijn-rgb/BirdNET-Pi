@@ -265,7 +265,7 @@ body:has(.species-page) main, body:has(.species-page) .topnav-in { max-width: 12
 .hours .bars { height: 72px; }
 .days .bars { height: 56px; }
 .year .bars { height: 72px; }
-.year .bars .bar { fill: var(--bar-soft, var(--bar)); opacity: .6; }
+.year .bars .bar { fill: var(--bar); opacity: .6; }
 .year .bars .bar-now { fill: var(--bar); opacity: 1; }
 .year .bars .bar-empty.bar-now { fill: var(--text); opacity: 1; }
 .chance { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
