@@ -55,7 +55,8 @@ function v2_lookout_section(DateTimeImmutable $now): void
     }
     $soon = v2_soon($scores, $heard, $excluded, $wk['gweek']);
     $sinceRaw = (string) ($state['since'] ?? '');
-    $since = preg_match('/^\d{4}-\d{2}-\d{2}$/', $sinceRaw) ? new DateTimeImmutable($sinceRaw, $tz) : $wk['start'];
+    $parsed = DateTimeImmutable::createFromFormat('!Y-m-d', $sinceRaw, $tz);
+    $since = $parsed !== false && $parsed->format('Y-m-d') === $sinceRaw ? $parsed : $wk['start']; // corrupt state: fall back
     $nFound = count($found);
     $sinceTxt = 'sinds ' . v2_fmt_day_month($since);
     $facts = v2_facts();
