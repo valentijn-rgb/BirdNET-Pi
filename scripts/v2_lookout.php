@@ -119,13 +119,23 @@ function v2_lookout_state(): array
     return v2_json_file(v2_lookout_state_path());
 }
 
+/** Shared with the analysis user (pi): group pi, mode 0664. Failures are ignored (not allowed, or the emulator). */
+function v2_lookout_share(string $file): void
+{
+    @chgrp($file, 'pi');
+    @chmod($file, V2_LOOKOUT_FILE_MODE);
+}
+
 /** Atomic write: temp file in the same directory, mode 0664, rename. */
 function v2_lookout_write(string $path, array $state): bool
 {
     $state['weeks'] = (object) ($state['weeks'] ?? []); // an empty map must stay {}
     $json = json_encode($state, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
     $tmp = $json === false ? false : @tempnam(dirname($path), '.lookout-');
-    if ($tmp === false || @file_put_contents($tmp, $json) !== strlen($json) || !@chmod($tmp, V2_LOOKOUT_FILE_MODE) || !@rename($tmp, $path)) {
+    if ($tmp !== false) {
+        v2_lookout_share($tmp);
+    }
+    if ($tmp === false || @file_put_contents($tmp, $json) !== strlen($json) || !@rename($tmp, $path)) {
         if ($tmp !== false) {
             @unlink($tmp);
         }
@@ -147,9 +157,9 @@ function v2_lookout_week(DateTimeImmutable $now): array
     $start = v2_week_start($now);
     $gweek = v2_week48((int) $now->format('W'));
     $path = v2_lookout_state_path();
-    $lock = @fopen($path . '.lock', 'a');
+    $lock = @fopen($path . '.lock', 'a') ?: @fopen($path . '.lock', 'r'); // read-only fd still takes flock
     if ($lock !== false) {
-        @chmod($path . '.lock', V2_LOOKOUT_FILE_MODE);
+        v2_lookout_share($path . '.lock');
         flock($lock, LOCK_EX);
     }
     try {
