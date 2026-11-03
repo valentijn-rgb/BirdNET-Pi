@@ -3,6 +3,8 @@ import os
 import socket
 import requests
 import html
+import json
+import re
 import time
 
 from .db import get_todays_count_for, get_this_weeks_count_for
@@ -11,10 +13,35 @@ from .helpers import get_settings
 userDir = os.path.expanduser('~')
 APPRISE_CONFIG = userDir + '/BirdNET-Pi/apprise.txt'
 APPRISE_BODY = userDir + '/BirdNET-Pi/body.txt'
+LABELS_NL = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'model', 'l18n', 'labels_nl.json')
 
 apobj = None
 images = {}
 species_last_notified = {}
+dutch_names = None
+
+
+def get_dutch_name(sci_name, com_name):
+    global dutch_names
+    if dutch_names is None:
+        try:
+            with open(LABELS_NL) as f:
+                dutch_names = json.load(f)
+        except Exception as e:
+            print("DUTCH LABELS ERROR:", e)
+            dutch_names = {}
+    return dutch_names.get(sci_name, com_name)
+
+
+def dutch_reason(reason):
+    if reason == "detection":
+        return "nieuwe waarneming"
+    if reason == "first time today":
+        return "eerste keer vandaag"
+    m = re.fullmatch(r"only seen (\d+) times in last 7d", reason)
+    if m:
+        return f"pas {m.group(1)}x gezien in 7 dagen"
+    return reason
 
 
 def notify(body, title, attached=""):
@@ -47,6 +74,8 @@ def notify(body, title, attached=""):
 def sendAppriseNotifications(sci_name, com_name, confidence, confidencepct, path, date, time_of_day, week, latitude, longitude, cutoff, sens, overlap):
     def render_template(template, reason=""):
         ret = template.replace("$sciname", sci_name) \
+            .replace("$nlname", nl_name) \
+            .replace("$nlreason", dutch_reason(reason)) \
             .replace("$comname", com_name) \
             .replace("$confidencepct", str(confidencepct)) \
             .replace("$confidence", str(confidence)) \
@@ -68,6 +97,7 @@ def sendAppriseNotifications(sci_name, com_name, confidence, confidencepct, path
     if not should_notify(com_name):
         return
 
+    nl_name = get_dutch_name(sci_name, com_name)
     settings_dict = get_settings()
     title = html.unescape(settings_dict.get('APPRISE_NOTIFICATION_TITLE'))
     f = open(APPRISE_BODY, 'r')
