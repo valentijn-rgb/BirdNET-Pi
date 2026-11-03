@@ -252,7 +252,8 @@ function v2_dots_word(int $n): string
 /**
  * One short reason this species is on the list now, from its 48 weekly scores: "Trekt nu door"
  * (a peak at least 1.5x the scores 6 weeks before and after),
- * "Wintergast" / "Zomergast" (1.5x more likely in winter, weeks 41-8, than summer, weeks 17-32, or the reverse),
+ * "Wintergast" / "Zomergast" (1.5x more likely in winter, weeks 41-8, than summer, weeks 17-32, or the reverse;
+ * only shown in that season: winter weeks 41-8, summer weeks 13-36, else ''),
  * "Hele jaar" (likely in 40+ weeks), else ''. The geomodel curves are broad (koperwiek 0.9 in winter, 0.36 in summer),
  * so the season ratio is checked before "Hele jaar".
  */
@@ -268,11 +269,17 @@ function v2_why_now(array $weeks48, int $gweek): string
     }
     $winter = $mean(array_merge(range(41, 48), range(1, 8)));
     $summer = $mean(range(17, 32));
+    $season = '';
     if ($winter > 0 && $winter >= V2_SEASON_RATIO * $summer) {
-        return 'Wintergast';
+        $season = 'Wintergast';
+    } elseif ($summer > 0 && $summer >= V2_SEASON_RATIO * $winter) {
+        $season = 'Zomergast';
     }
-    if ($summer > 0 && $summer >= V2_SEASON_RATIO * $winter) {
-        return 'Zomergast';
+    if ($season !== '') {
+        // a seasonal bird is only labelled in its own season ("Zomergast" in November would mislead)
+        $inWinter = $gweek >= 41 || $gweek <= 8;
+        $inSummer = $gweek >= 13 && $gweek <= 36;
+        return ($season === 'Wintergast' && $inWinter) || ($season === 'Zomergast' && $inSummer) ? $season : '';
     }
     $present = 0;
     for ($w = 1; $w <= 48; $w++) {

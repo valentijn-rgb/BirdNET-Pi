@@ -153,6 +153,14 @@ class TestNotifyCatches(unittest.TestCase):
         self.assertIn('07:15, zekerheid 84%', body)
         self.assertIn('Al 1 gevonden sinds 2 nov.', body)
 
+    def test_corrupt_since_falls_back_to_monday(self):
+        with open(self.state, 'w') as f:
+            json.dump({'since': 'garbage', 'weeks': {'2026-W45': ['Turdus pilaris']}}, f)
+        self.add_row('Turdus pilaris')
+        lookout.notify_catches([self.det()], {}, self.TODAY)
+        self.notify.assert_called_once()
+        self.assertIn('sinds 2 nov.', self.notify.call_args[0][0])
+
     def test_two_detections_of_new_bird_in_one_file_push_once(self):
         self.add_row('Turdus pilaris', time='07:15:00')
         self.add_row('Turdus pilaris', time='07:15:03')

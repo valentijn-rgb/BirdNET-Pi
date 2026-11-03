@@ -75,7 +75,7 @@ function v2_lookout_section(DateTimeImmutable $now): void
 <div class="lookout-head">
 <div class="lookout-title">
 <h2 id="lookout"><?= v2_icon(V2_EYE, 20, 2) ?>Om op te letten deze week</h2>
-<p class="small muted">Week <?= h($wk['start']->format('W')) ?> · <?= h(v2_fmt_week_range($wk['start'])) ?> · nog nooit gehoord, wel te verwachten</p>
+<p class="small muted">Week <?= h((int) $wk['start']->format('W')) ?> · <?= h(v2_fmt_week_range($wk['start'])) ?> · nog nooit gehoord, wel te verwachten</p>
 </div>
 <?php if ($nFound > 0) { ?>
 <p class="lookout-count head-only"><strong><?= $nFound ?> gevonden</strong> <span class="small muted"><?= h($sinceTxt) ?></span></p>
@@ -118,7 +118,7 @@ function v2_lookout_section(DateTimeImmutable $now): void
 <?php }
     if ($soon !== []) { ?>
 <p class="lookout-soon small muted"><?= v2_icon(V2_CLOCK, 16, 2) ?><span>Binnenkort: <?php
-        echo implode(' · ', array_map(fn($s) => '<strong>' . h(mb_strtolower($label($s['sci']))) . '</strong> (over ' . $s['weeks'] . ' weken)', $soon));
+        echo implode(' · ', array_map(fn($s) => '<strong>' . h($label($s['sci'])) . '</strong> (over ' . $s['weeks'] . ' weken)', $soon));
     ?></span></p>
 <?php }
     if ($nFound > 0) {

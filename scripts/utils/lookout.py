@@ -206,7 +206,10 @@ def _notify_catch(det, today, batch_count=1):
         name = _read_json(NAMES_PATH).get(sci) or det.common_name
     except Exception:
         name = det.common_name
-    since = date.fromisoformat(state.get('since') or monday)
+    try:
+        since = date.fromisoformat(state.get('since') or monday)
+    except (ValueError, TypeError):  # corrupt state file: same fallback as the PHP side
+        since = week_start(d)
     body = (f'Stond op je uitkijklijst van deze week. {det.time[:5]}, zekerheid {det.confidence_pct}%. '
             f'Al {count} gevonden sinds {since.day} {MONTHS_NL[since.month - 1]}.')
     notifications.notify(body, f'Gevonden! {name}')
