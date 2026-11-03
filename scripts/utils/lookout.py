@@ -168,23 +168,27 @@ def notify_catches(detections, conf, today=None):
     Called after the normal alerts; ignores the each-detection toggle and the throttle, but
     respects notifications.species_allowed. Never raises: a failure is logged per species.
     """
+    in_batch = {}
+    for det in detections:
+        in_batch[det.scientific_name] = in_batch.get(det.scientific_name, 0) + 1
     seen = set()
     for det in detections:
         if det.scientific_name in seen:
             continue
         seen.add(det.scientific_name)
         try:
-            _notify_catch(det, today)
+            _notify_catch(det, today, in_batch[det.scientific_name])
         except Exception:
             log.exception('Lookout catch check failed for %s', det.scientific_name)
 
 
-def _notify_catch(det, today):
+def _notify_catch(det, today, batch_count=1):
     sci = det.scientific_name
-    con = sqlite3.connect(db.DB_PATH)
+    con = sqlite3.connect(f'file:{db.DB_PATH}?mode=ro', uri=True)
     try:
         n = con.execute('SELECT COUNT(*) FROM detections WHERE Sci_Name = ?', (sci,)).fetchone()[0]
-        if n != 1:  # not the first ever (or not written)
+        # all rows written already, so first ever = every row of this species is from this batch
+        if n == 0 or n != batch_count:
             return
         d = today or date.fromisoformat(det.date)
         data = _read_json(SCORES_PATH)

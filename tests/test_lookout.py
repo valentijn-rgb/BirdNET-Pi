@@ -144,6 +144,7 @@ class TestNotifyCatches(unittest.TestCase):
 
     def test_catch_pushes_once(self):
         self.add_row('Turdus pilaris')
+        self.add_row('Turdus pilaris')
         lookout.notify_catches([self.det(), self.det()], {}, self.TODAY)
         self.notify.assert_called_once()
         body, title = self.notify.call_args[0][:2]
@@ -151,6 +152,35 @@ class TestNotifyCatches(unittest.TestCase):
         self.assertIn('Stond op je uitkijklijst', body)
         self.assertIn('07:15, zekerheid 84%', body)
         self.assertIn('Al 1 gevonden sinds 2 nov.', body)
+
+    def test_two_detections_of_new_bird_in_one_file_push_once(self):
+        self.add_row('Turdus pilaris', time='07:15:00')
+        self.add_row('Turdus pilaris', time='07:15:03')
+        lookout.notify_catches([self.det(), self.det()], {}, self.TODAY)
+        self.notify.assert_called_once()
+
+    def test_older_row_plus_batch_no_push(self):
+        self.add_row('Turdus pilaris', day='2026-11-03', time='06:00:00')
+        self.add_row('Turdus pilaris', time='07:15:00')
+        self.add_row('Turdus pilaris', time='07:15:03')
+        lookout.notify_catches([self.det(), self.det()], {}, self.TODAY)
+        self.notify.assert_not_called()
+
+    def test_reporting_apprise_runs_catch(self):
+        try:
+            from scripts.utils import reporting  # needs Pillow, not in the minimal test env
+        except ImportError as e:
+            self.skipTest(f'reporting not importable: {e}')
+        self.add_row('Turdus pilaris')
+        det = self.det()
+        det.species = det.scientific_name
+        det.file_name_extr = 'x.mp3'
+        det.week = 45
+        with patch.object(reporting, 'get_settings', return_value={
+                'LATITUDE': 0, 'LONGITUDE': 0, 'CONFIDENCE': 0.7, 'SENSITIVITY': 1.25, 'OVERLAP': 0}), \
+                patch.object(reporting, 'sendAppriseNotifications'):
+            reporting.apprise(None, [det])
+        self.notify.assert_called_once()
 
     def test_second_detection_no_push(self):
         self.add_row('Turdus pilaris', time='06:00:00')
