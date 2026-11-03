@@ -110,8 +110,8 @@ main:has(> .tools) { gap: 12px; }
 /* Hero at 3:2 (most Commons bird photos) with the crop pulled up towards the head; a.zoom opens it whole */
 .photo.hero { width: 100%; height: auto; aspect-ratio: 3 / 2; max-height: 45vh; object-position: 50% 30%; border-radius: 0; }
 a.zoom { display: block; cursor: zoom-in; }
-dialog.zoom { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: transparent; cursor: zoom-out; }
-dialog.zoom::backdrop { background: rgba(0, 0, 0, .92); }
+dialog.zoom { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: #000; cursor: zoom-out; }
+dialog.zoom::backdrop { background: #000; }
 dialog.zoom img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .placeholder { display: flex; align-items: center; justify-content: center; color: var(--chip-text); font-size: var(--f20); font-weight: var(--bold); }
 
