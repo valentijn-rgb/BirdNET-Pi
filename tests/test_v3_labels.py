@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from scripts.utils.helpers import set_label_file
 from scripts.v3_make_labels import make_labels
+from scripts.v3_make_species_list import make_scores
 from tests.helpers import Settings
 
 
@@ -45,6 +46,21 @@ class TestMakeLabels(unittest.TestCase):
         rows = [row('Anas carolinensis', 'Teal'), row('Anas crecca', 'Eurasian Teal')]
         lines = make_labels(rows, ['Anas crecca'], {'Anas crecca': 'Teal'}, {})
         self.assertEqual(lines, ['Anas carolinensis_Teal', 'Anas crecca_Teal'])
+
+
+class TestMakeScores(unittest.TestCase):
+
+    def test_make_scores_birds_only_rounded_and_labelled(self):
+        per_week = {1: {'A_v3': 0.123, 'Frog_v3': 0.9}, 2: {'A_v3': 0.5}}
+        pi_name = {'A_v3': 'Turdus pilaris', 'Frog_v3': 'Rana x'}
+        scores = make_scores(per_week, pi_name, lambda sci: sci == 'A_v3', {'Turdus pilaris'})
+        self.assertEqual(scores, {'Turdus pilaris': [0.12, 0.5] + [0.0] * 46})
+
+    def test_bird_missing_from_labelled_is_dropped(self):
+        per_week = {1: {'A_v3': 0.5, 'B_v3': 0.5}}
+        pi_name = {'A_v3': 'Turdus pilaris', 'B_v3': 'Unlabelled bird'}
+        scores = make_scores(per_week, pi_name, lambda sci: True, {'Turdus pilaris'})
+        self.assertEqual(list(scores), ['Turdus pilaris'])
 
 
 class TestSetLabelFile(unittest.TestCase):
