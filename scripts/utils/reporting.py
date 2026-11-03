@@ -15,6 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 from .helpers import get_settings, get_font, DB_PATH
 from .classes import Detection, ParseFileName
 from .notifications import sendAppriseNotifications
+from . import lookout
 
 log = logging.getLogger(__name__)
 
@@ -165,6 +166,11 @@ def apprise(file: ParseFileName, detections: [Detection]):
                 log.exception('Error during Apprise:', exc_info=e)
 
             species_apprised_this_run.append(detection.species)
+
+    try:
+        lookout.notify_catches(detections, conf)
+    except BaseException as e:
+        log.exception('Error during lookout notification:', exc_info=e)
 
 
 def bird_weather(file: ParseFileName, detections: [Detection]):

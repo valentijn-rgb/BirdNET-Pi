@@ -8,12 +8,25 @@ State lives in a small JSON file shared with the web UI:
 import fcntl
 import hashlib
 import json
+import logging
 import math
 import os
+import sqlite3
 import tempfile
 from datetime import date, datetime, timedelta
 
+from . import db
+from . import notifications
+from .helpers import BASE_PATH
+
+log = logging.getLogger(__name__)
+
 FILE_MODE = 0o664
+STATE_PATH = os.path.join(BASE_PATH, 'scripts', 'lookout.json')
+SCORES_PATH = os.path.join(BASE_PATH, 'model', 'v3_species_scores.json')
+NAMES_PATH = os.path.join(BASE_PATH, 'model', 'l18n', 'labels_nl.json')
+EXCLUDE_PATH = os.path.expanduser('~/BirdNET-Pi/exclude_species_list.txt')
+MONTHS_NL = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec']
 
 
 def week48(iso_week):
@@ -85,7 +98,11 @@ def ensure_week(path, d, scores, heard_before, excluded):
     """Return the stored pick for d's week, computing and storing it first if missing."""
     key = week_key(d)
     lock_path = path + '.lock'
-    with open(lock_path, 'a') as lock:
+    try:
+        lock = open(lock_path, 'a')
+    except OSError:
+        lock = open(lock_path, 'r')  # not ours to write (made by the web user): flock works on a read fd
+    with lock:
         try:
             os.fchmod(lock.fileno(), FILE_MODE)  # shared with the web user
         except OSError:
@@ -133,3 +150,59 @@ def found(con, state):
             if start <= first < end:
                 out.append((sci, row[0]))
     return sorted(out, key=lambda t: (t[1], t[0]))
+
+
+def _read_json(path):
+    with open(path, encoding='utf-8') as f:
+        return json.load(f)
+
+
+def _excluded():
+    from .analysis import loadCustomSpeciesList  # lazy: analysis pulls in the model code
+    return loadCustomSpeciesList(EXCLUDE_PATH)
+
+
+def notify_catches(detections, conf, today=None):
+    """Push "Gevonden!" for each listed species whose very first detection just got written.
+
+    Called after the normal alerts; ignores the each-detection toggle and the throttle, but
+    respects notifications.species_allowed. Never raises: a failure is logged per species.
+    """
+    seen = set()
+    for det in detections:
+        if det.scientific_name in seen:
+            continue
+        seen.add(det.scientific_name)
+        try:
+            _notify_catch(det, today)
+        except Exception:
+            log.exception('Lookout catch check failed for %s', det.scientific_name)
+
+
+def _notify_catch(det, today):
+    sci = det.scientific_name
+    con = sqlite3.connect(db.DB_PATH)
+    try:
+        n = con.execute('SELECT COUNT(*) FROM detections WHERE Sci_Name = ?', (sci,)).fetchone()[0]
+        if n != 1:  # not the first ever (or not written)
+            return
+        d = today or date.fromisoformat(det.date)
+        data = _read_json(SCORES_PATH)
+        scores = data.get('species', data)
+        monday = week_start(d).isoformat()
+        heard = {r[0] for r in con.execute('SELECT DISTINCT Sci_Name FROM detections WHERE Date < ?', (monday,))}
+        picked = ensure_week(STATE_PATH, d, scores, heard, set(_excluded()))
+        if sci not in picked or not notifications.species_allowed(det.common_name):
+            return
+        state = load_state(STATE_PATH)
+        count = len(found(con, state))
+    finally:
+        con.close()
+    try:
+        name = _read_json(NAMES_PATH).get(sci) or det.common_name
+    except Exception:
+        name = det.common_name
+    since = date.fromisoformat(state.get('since') or monday)
+    body = (f'Stond op je uitkijklijst van deze week. {det.time[:5]}, zekerheid {det.confidence_pct}%. '
+            f'Al {count} gevonden sinds {since.day} {MONTHS_NL[since.month - 1]}.')
+    notifications.notify(body, f'Gevonden! {name}')

@@ -118,7 +118,8 @@ def sendAppriseNotifications(sci_name, com_name, confidence, confidencepct, path
             species_last_notified[com_name] = int(time.time())
 
 
-def should_notify(com_name):
+def species_allowed(com_name):
+    """Notifications are configured and the species passes the include/exclude filters."""
     settings_dict = get_settings()
     if not (os.path.exists(APPRISE_CONFIG) and os.path.getsize(APPRISE_CONFIG) > 0):
         return False
@@ -136,6 +137,15 @@ def should_notify(com_name):
         included_species = [bird.lower().replace(" ", "") for bird in APPRISE_ONLY_NOTIFY_SPECIES_NAMES_2.split(",")]
         if com_name.lower().replace(" ", "") not in included_species:
             return False
+
+    return True
+
+
+def should_notify(com_name):
+    if not species_allowed(com_name):
+        return False
+
+    settings_dict = get_settings()
 
     # is it still too soon?
     APPRISE_MINIMUM_SECONDS_BETWEEN_NOTIFICATIONS_PER_SPECIES = settings_dict.get('APPRISE_MINIMUM_SECONDS_BETWEEN_NOTIFICATIONS_PER_SPECIES')

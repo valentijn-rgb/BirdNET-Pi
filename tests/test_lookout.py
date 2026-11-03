@@ -4,6 +4,8 @@ import sqlite3
 import tempfile
 import unittest
 from datetime import date
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from scripts.utils import lookout
 
@@ -99,6 +101,116 @@ class TestLookout(unittest.TestCase):
             ('Last second', '2026-11-08 23:59:59'),
         ])
         self.assertEqual(lookout.found(con, {}), [])
+
+
+class TestNotifyCatches(unittest.TestCase):
+    TODAY = date(2026, 11, 4)  # Wednesday of 2026-W45
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        d = self.tmp.name
+        self.state = os.path.join(d, 'lookout.json')
+        self.scores = os.path.join(d, 'scores.json')
+        self.names = os.path.join(d, 'nl.json')
+        self.dbfile = os.path.join(d, 'birds.db')
+        with open(self.scores, 'w') as f:
+            json.dump({'species': {'Turdus pilaris': [0.9] * 48, 'Other bird': [0.01] * 48}}, f)
+        with open(self.names, 'w') as f:
+            json.dump({'Turdus pilaris': 'Kramsvogel'}, f)
+        con = sqlite3.connect(self.dbfile)
+        con.execute('CREATE TABLE detections (Date date, Time time, Sci_Name text, Com_Name text, '
+                    'Confidence float)')
+        con.commit()
+        con.close()
+        self.notify = patch('scripts.utils.notifications.notify').start()
+        patch('scripts.utils.notifications.species_allowed', return_value=True).start()
+        patch.object(lookout, 'STATE_PATH', self.state).start()
+        patch.object(lookout, 'SCORES_PATH', self.scores).start()
+        patch.object(lookout, 'NAMES_PATH', self.names).start()
+        patch.object(lookout, '_excluded', return_value=[]).start()
+        patch('scripts.utils.db.DB_PATH', self.dbfile).start()
+        self.addCleanup(patch.stopall)
+
+    def add_row(self, sci, day='2026-11-04', time='07:15:00'):
+        con = sqlite3.connect(self.dbfile)
+        con.execute('INSERT INTO detections VALUES (?,?,?,?,?)', (day, time, sci, 'Com', 0.84))
+        con.commit()
+        con.close()
+
+    def det(self, sci='Turdus pilaris', com='Fieldfare'):
+        return SimpleNamespace(scientific_name=sci, common_name=com, confidence=0.84,
+                               confidence_pct=84, date='2026-11-04', time='07:15:00')
+
+    def test_catch_pushes_once(self):
+        self.add_row('Turdus pilaris')
+        lookout.notify_catches([self.det(), self.det()], {}, self.TODAY)
+        self.notify.assert_called_once()
+        body, title = self.notify.call_args[0][:2]
+        self.assertEqual(title, 'Gevonden! Kramsvogel')
+        self.assertIn('Stond op je uitkijklijst', body)
+        self.assertIn('07:15, zekerheid 84%', body)
+        self.assertIn('Al 1 gevonden sinds 2 nov.', body)
+
+    def test_second_detection_no_push(self):
+        self.add_row('Turdus pilaris', time='06:00:00')
+        self.add_row('Turdus pilaris')
+        lookout.notify_catches([self.det()], {}, self.TODAY)
+        self.notify.assert_not_called()
+
+    def test_not_on_list_no_push(self):
+        self.add_row('Other bird')
+        lookout.notify_catches([self.det('Other bird', 'Other')], {}, self.TODAY)
+        self.notify.assert_not_called()
+
+    def test_heard_before_this_week_is_not_picked(self):
+        self.add_row('Turdus pilaris', day='2026-10-20')
+        self.add_row('Turdus pilaris')
+        lookout.notify_catches([self.det()], {}, self.TODAY)
+        self.notify.assert_not_called()
+
+    def test_catch_before_any_page_render(self):
+        self.assertFalse(os.path.exists(self.state))
+        self.add_row('Turdus pilaris')
+        lookout.notify_catches([self.det()], {}, self.TODAY)
+        self.assertEqual(lookout.load_state(self.state)['weeks']['2026-W45'], ['Turdus pilaris'])
+        self.notify.assert_called_once()
+
+    def test_excluded_by_notify_filter_no_push(self):
+        self.add_row('Turdus pilaris')
+        with patch('scripts.utils.notifications.species_allowed', return_value=False):
+            lookout.notify_catches([self.det()], {}, self.TODAY)
+        self.notify.assert_not_called()
+
+    def test_excluded_species_never_picked(self):
+        self.add_row('Turdus pilaris')
+        with patch.object(lookout, '_excluded', return_value=['Turdus pilaris']):
+            lookout.notify_catches([self.det()], {}, self.TODAY)
+        self.notify.assert_not_called()
+
+    def test_falls_back_to_common_name(self):
+        with open(self.names, 'w') as f:
+            f.write('{}')
+        self.add_row('Turdus pilaris')
+        lookout.notify_catches([self.det()], {}, self.TODAY)
+        self.assertEqual(self.notify.call_args[0][1], 'Gevonden! Fieldfare')
+
+    def test_corrupt_state_no_raise(self):
+        with open(self.state, 'w') as f:
+            f.write('{')
+        os.remove(self.scores)
+        self.add_row('Turdus pilaris')
+        lookout.notify_catches([self.det()], {}, self.TODAY)
+        self.notify.assert_not_called()
+
+    def test_ensure_week_with_readonly_lock(self):
+        scores = {f'Species {i}': [0.5] * 48 for i in range(6)}
+        path = os.path.join(self.tmp.name, 'ro.json')
+        open(path + '.lock', 'w').close()
+        os.chmod(path + '.lock', 0o444)
+        got = lookout.ensure_week(path, self.TODAY, scores, set(), set())
+        self.assertEqual(len(got), 5)
+        self.assertEqual(lookout.load_state(path)['weeks']['2026-W45'], got)
 
 
 if __name__ == '__main__':
