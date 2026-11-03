@@ -186,6 +186,55 @@ table.list.home td.when, table.list.home td.count { display: none; }
   main > .home-list > .home .photo { width: 48px; height: 48px; }
 }
 
+/* Home: Om op te letten deze week. Phone: rows (.m-only parts); 900px+: table (.alt cells). */
+.lookout { gap: 8px; margin-top: 8px; }
+.lookout-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.lookout-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.lookout h2 { display: flex; align-items: center; gap: 8px; }
+.lookout h2 svg { flex: none; color: var(--accent); }
+.lookout .head-only, .lookout table.home td.alt { display: none; }
+.lookout .row:not(.found), .lookout .row:not(.found) > td > a { align-items: flex-start; }
+.lookout .row:not(.found) { padding-top: 12px; padding-bottom: 12px; }
+.lookout .row-text { gap: 4px; }
+.lookout .row-sub { display: flex; align-items: center; gap: 6px; }
+.lookout .chip.tag { background: transparent; border: 0; box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--muted); font-weight: 500; }
+.dots { display: inline-flex; gap: 3px; align-items: center; flex: none; }
+.dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--bar); box-sizing: border-box; }
+.dot.on { background: var(--bar); }
+.fact { font-size: var(--f13); color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.lookout .row.found { background: var(--sel); }
+.photo.found-photo { display: flex; align-items: center; justify-content: center; flex: none; background: var(--accent); color: var(--on-accent); }
+.lookout-soon { display: flex; align-items: center; gap: 6px; padding: 0 4px; }
+.lookout-soon svg { flex: none; }
+.lookout-soon strong { color: var(--text); }
+.lookout-count { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--surface); border-radius: var(--radius); padding: 12px 14px; }
+.lookout-count .lc-text { display: flex; flex-direction: column; }
+.lookout-count strong { font-size: var(--f17); font-weight: var(--bold); }
+@media (min-width: 900px) {
+  main > .lookout { background: var(--surface); border-radius: var(--radius); gap: 0; margin-top: 0; overflow-x: auto; }
+  .lookout-head { padding: 14px 18px 8px; }
+  .lookout .head-only { display: flex; flex-direction: column; align-items: flex-end; }
+  .lookout .head-only strong { font-size: var(--f17); font-weight: var(--bold); }
+  .lookout .m-only, .lookout-count:not(.head-only) { display: none; }
+  .lookout .empty { border-radius: 0; }
+  main > .lookout > .home { display: table; border-collapse: collapse; width: 100%; min-width: 640px; border-radius: 0; }
+  main > .lookout > .home thead { position: static; width: auto; height: auto; overflow: visible; clip-path: none; display: table-header-group; }
+  main > .lookout > .home tbody { display: table-row-group; }
+  main > .lookout > .home tr.row { display: table-row; }
+  main > .lookout > .home th { text-align: left; font-size: var(--f13); font-weight: var(--semi); color: var(--muted); padding: 8px 12px; }
+  main > .lookout > .home td, main > .lookout > .home td.alt { display: table-cell; padding: 8px 12px; vertical-align: middle; border-top: 1px solid var(--line); text-align: left; }
+  main > .lookout > .home th:first-child, main > .lookout > .home td:first-child { padding-left: 18px; }
+  main > .lookout > .home th:last-child, main > .lookout > .home td:last-child { padding-right: 18px; text-align: left; }
+  main > .lookout > .home td.sp { width: 240px; }
+  main > .lookout > .home td.sp > a { align-items: center; }
+  main > .lookout > .home td.chance { white-space: nowrap; }
+  main > .lookout > .home td.chance .dots { margin-right: 6px; vertical-align: middle; }
+  main > .lookout > .home td.fact { display: table-cell; max-width: 340px; -webkit-line-clamp: unset; overflow-wrap: anywhere; }
+  main > .lookout > .home .photo { width: 48px; height: 48px; }
+  .lookout .row.found td.alt { white-space: normal; }
+  .lookout-soon { padding: 12px 18px; border-top: 1px solid var(--line); }
+}
+
 /* Soorten: list on phones, sortable table + detail panel from 900px */
 body:has(.species-page) main, body:has(.species-page) .topnav-in { max-width: 1200px; }
 .species-page, .species-list { display: flex; flex-direction: column; gap: 16px; min-width: 0; }

@@ -1,6 +1,7 @@
 <?php
 // Home: what was heard this listening session (since boot), newest species first.
 require __DIR__ . '/inc/session_view.php';
+require __DIR__ . '/inc/lookout_view.php';
 require __DIR__ . '/inc/status_probe.php';
 
 const V2_MIC = 'M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v2a7 7 0 0 1-14 0v-2M12 19v3';
@@ -27,6 +28,7 @@ v2_guard(function (): void {
 <a class="link" href="/v2/sessions.php">Alle sessies</a>
 <?php
     }]);
+    v2_lookout_section($now);
     ?>
 <a class="link" href="/v2/status.php">Status bekijken</a>
 <?php
