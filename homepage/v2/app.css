@@ -282,7 +282,12 @@ body:has(.species-page) main, body:has(.species-page) .topnav-in { max-width: 12
 .detail-body { display: flex; flex-direction: column; gap: 16px; padding-top: 16px; }
 .title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .title h1 { overflow-wrap: break-word; hyphens: auto; }
-.stats { margin-top: 4px; }
+.observations { gap: 10px; }
+.observations h2 { font-size: var(--f17); font-weight: var(--bold); }
+.obs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+.obs-grid > div { display: flex; flex-direction: column; min-width: 0; }
+.obs-grid b { font-size: var(--f17); font-weight: var(--bold); overflow-wrap: anywhere; }
+.obs-grid span { font-size: var(--f13, 13px); color: var(--muted); }
 .fig-title { font-size: var(--f17); font-weight: var(--bold); }
 .detail .chart { gap: 8px; padding: 14px; }
 .hours .bars { height: 72px; }
@@ -363,8 +368,8 @@ body:has(.species-page) main, body:has(.species-page) .topnav-in { max-width: 12
   .detail .hours .bars { height: 64px; }
   .detail .days .bars { height: 48px; }
   .detail .year .bars { height: 56px; }
-  .detail .fact-card, .detail .recs-empty { padding: 0; background: none; border-radius: 0; gap: 6px; }
-  .detail .fact-card h2, .detail .recs-empty h2 { font-size: var(--f15); }
+  .detail .fact-card, .detail .recs-empty, .detail .observations { padding: 0; background: none; border-radius: 0; gap: 6px; }
+  .detail .fact-card h2, .detail .recs-empty h2, .detail .observations h2 { font-size: var(--f15); }
   /* Flat recording rows */
   .detail .recs { gap: 4px; }
   .detail .rec-list { border-radius: 0; overflow: visible; }

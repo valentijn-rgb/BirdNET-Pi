@@ -30,6 +30,14 @@ function v2_dots_html(int $n): string
     return '<span class="dots" role="img" aria-label="' . h(v2_dots_word($n)) . '">' . $dots . '</span>';
 }
 
+/** "●●○ Waarschijnlijk deze week · [why-now chip]": the chance line on both species pages. */
+function v2_chance_line(int $dots, string $why): string
+{
+    $word = v2_dots_word($dots) ?: 'Niet te verwachten';
+    return '<p class="chance muted">' . v2_dots_html($dots) . '<strong>' . h($word) . '</strong> deze week'
+        . ($why !== '' ? ' · <span class="chip tag">' . h($why) . '</span>' : '') . '</p>';
+}
+
 /** Prints the section; prints nothing without a scores file. */
 function v2_lookout_section(DateTimeImmutable $now): void
 {

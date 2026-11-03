@@ -1,8 +1,8 @@
 <?php
 // Soorten: every species ever heard, sorted on the server (?sort=&dir=), plus the species detail
 // (?sci=) beside the table from 900 px up, or as its own page on a phone.
-require __DIR__ . '/inc/shell.php';
-require __DIR__ . '/inc/charts.php';
+require_once __DIR__ . '/inc/shell.php';
+require_once __DIR__ . '/inc/charts.php';
 require __DIR__ . '/inc/lookout_view.php';
 
 /** Sortable columns in table order: key => [label, default dir]. */
@@ -98,6 +98,7 @@ v2_guard(function (): void {
             $days = v2_species_days($sci, 30);
             $recs = v2_species_recordings($sci, 1, V2_RECENT_RECS);
         }
+        $foundAt = v2_lookout_found(v2_lookout_state())[$sci] ?? null; // first heard via the lookout list
         $fact = v2_facts()[$sci] ?? null;
         $fact = is_string($fact) && trim($fact) !== '' ? $fact : null;
     }
@@ -195,12 +196,21 @@ foreach ($shown as $r) {
         foreach ($recs['rows'] as $rec) {
             $groups[$rec['Date']][] = $rec;
         }
-    } else {
-        $score = (float) ($weeks48[$gweek - 1] ?? 0);
-        $dots = v2_dots($score);
-        $chance = v2_dots_word($dots) ?: 'Niet te verwachten';
-        $why = v2_why_now($weeks48, $gweek);
     }
+    $yearFig = '';
+    if (is_array($weeks48)) {
+        ob_start();
+        ?>
+<figure class="card chart year">
+<figcaption class="fig-title">Kans door het jaar · Rotterdam</figcaption>
+<?= v2_year_svg($weeks48, $gweek, v2_year_aria($weeks48)) ?>
+<div class="axis" aria-hidden="true"><span>jan</span><span>apr</span><span>jul</span><span>okt</span><span>dec</span></div>
+<p class="small muted">Gemarkeerde balk: deze week. Bron: BirdNET+ geomodel V3.</p>
+</figure>
+<?php
+        $yearFig = ob_get_clean();
+    }
+    $chanceLine = is_array($weeks48) ? v2_chance_line(v2_dots((float) ($weeks48[$gweek - 1] ?? 0)), v2_why_now($weeks48, $gweek)) : '';
     ?>
 <aside id="detail" class="detail" aria-labelledby="detail-name">
 <div class="hero-wrap">
@@ -209,31 +219,38 @@ foreach ($shown as $r) {
 </div>
 <div class="detail-body">
 <header class="page-head">
-<div class="title"><h1 id="detail-name"><?= h($nl) ?></h1><?php if ($never) { ?><span class="chip tag">Nog niet gehoord</span><?php } elseif ($detail['first'] >= $sinceStr) { ?><span class="chip">Nieuw</span><?php } ?></div>
+<div class="title"><h1 id="detail-name"><?= h($nl) ?></h1><?php if ($never) { ?><span class="chip tag">Nog niet gehoord</span><?php } else { if ($detail['first'] >= $sinceStr) { ?><span class="chip">Nieuw</span><?php } if ($foundAt !== null) { ?><span class="chip">Gevonden!</span><?php } } ?></div>
 <p class="muted"><?= h($detail['names']['en']) ?> · <i><?= h($sci) ?></i></p>
-<?php if ($never) { ?>
-<p class="chance muted"><?= v2_dots_html($dots) ?><strong><?= h($chance) ?></strong> deze week<?php if ($why !== '') { ?> · <span class="chip tag"><?= h($why) ?></span><?php } ?></p>
-<?php } else { ?>
-<p class="stats muted"><strong><?= h(v2_fmt_int($sessionN)) ?>×</strong> deze sessie · <strong><?= h(v2_fmt_int($detail['n'])) ?>×</strong> totaal · eerst <?= h(v2_when_str($detail['first'], $now)) ?> · laatst <?= h(v2_when_str($detail['last'], $now)) ?></p>
-<?php } ?>
+<?= $chanceLine ?>
 </header>
+<?php if (!$never) { ?>
+<section class="card observations" aria-labelledby="obs-h">
+<h2 id="obs-h">Jouw waarnemingen</h2>
+<div class="obs-grid">
+<div><b><?= h(v2_fmt_int($sessionN)) ?>×</b>
+<span>deze sessie</span></div>
+<div><b><?= h(v2_fmt_int($detail['n'])) ?>×</b>
+<span>totaal</span></div>
+<div><b><?= h(v2_when_str($detail['first'], $now)) ?></b>
+<span>eerst gehoord</span></div>
+<div><b><?= h(v2_when_str($detail['last'], $now)) ?></b>
+<span>laatst gehoord</span></div>
+</div>
+<?php if ($foundAt !== null) { ?><p class="muted small">Stond op je uitkijklijst van week <?= (int) v2_dt($foundAt)->format('W') ?></p><?php } ?>
+</section>
+<?php } ?>
 <?php if ($fact !== null) { ?>
 <section class="card fact-card" aria-labelledby="fact-h">
 <h2 id="fact-h"><?= v2_icon(V2_BULB, 20, 2) ?>Wist je dat?</h2>
 <p><?= h($fact) ?></p>
 </section>
 <?php } ?>
-<?php if (is_array($weeks48)) { ?>
-<figure class="card chart year">
-<figcaption class="fig-title">Kans door het jaar · Rotterdam</figcaption>
-<?= v2_year_svg($weeks48, $gweek, v2_year_aria($weeks48)) ?>
-<div class="axis" aria-hidden="true"><span>jan</span><span>apr</span><span>jul</span><span>okt</span><span>dec</span></div>
-<p class="small muted">Gemarkeerde balk: deze week. Bron: BirdNET+ geomodel V3.</p>
-</figure>
+<?php if ($never) { ?>
+<?= $yearFig ?>
 <?php } ?>
 <?php if ($never) { ?>
 <section class="card recs-empty" aria-labelledby="recs-h">
-<h2 id="recs-h">Opnames</h2>
+<h2 id="recs-h">Jouw waarnemingen</h2>
 <p class="muted">Nog niet gehoord. Zodra je mic hem vangt, staan hier de opnames.</p>
 </section>
 <?php } else { ?>
@@ -249,6 +266,7 @@ foreach ($shown as $r) {
 <?php } ?></div>
 <?php if ($note !== '') { ?><p class="small muted"><?= h($note) ?></p><?php } ?>
 </figure>
+<?= $yearFig ?>
 <section class="recs" aria-labelledby="recs-h">
 <details class="recs-box">
 <summary><?= v2_icon_ref('chevron', V2_CHEVRON, 18, 2) ?><h2 id="recs-h">Opnames · laatste <?= h(v2_fmt_int($nRecs)) ?></h2></summary>
