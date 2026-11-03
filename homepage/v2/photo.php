@@ -1,5 +1,6 @@
 <?php
-// GET /v2/photo.php?sci=<Sci_Name>: 302 to a small Wikimedia thumbnail of the species photo.
+// GET /v2/photo.php?sci=<Sci_Name>[&full=1]: 302 to a small (or, with full=1, a large) Wikimedia
+// thumbnail of the species photo.
 // The page never waits on the network: a cached row (even an expired one) redirects at once and
 // is refreshed after the response; without a row one fetch is tried (3 s per HTTP call), and a
 // failure is remembered for 10 min so later requests answer 404 straight away.
@@ -27,6 +28,7 @@ if (!isset(v2_labels()[$sci])) {
     exit;
 }
 
+$width = isset($_GET['full']) ? V2_FULL_WIDTH : V2_THUMB_WIDTH;
 $flickr = (v2_conf()['IMAGE_PROVIDER'] ?? '') === 'FLICKR';
 $marker = 'photo-fail-' . md5($sci);
 
@@ -117,11 +119,11 @@ function v2_photo_net_unlock($fh): void
     fclose($fh);
 }
 
-function v2_photo_redirect(string $url): void
+function v2_photo_redirect(string $url, int $width): void
 {
     http_response_code(302);
     header('Cache-Control: public, max-age=86400');
-    header('Location: ' . v2_thumb_url($url, V2_THUMB_WIDTH));
+    header('Location: ' . v2_thumb_url($url, $width));
 }
 
 /**
@@ -163,7 +165,7 @@ function v2_photo_release(string $key, bool $ok): void
 $row = v2_photo_row(__ROOT__ . '/scripts/' . ($flickr ? 'flickr.db' : 'wikipedia.db'), $sci);
 
 if ($row !== null) {
-    v2_photo_redirect($row['image_url']);
+    v2_photo_redirect($row['image_url'], $width);
     if (v2_photo_is_stale($row['date_created'], $sci) && function_exists('fastcgi_finish_request')) {
         fastcgi_finish_request(); // the browser has its redirect; refresh in the background
         $lock = v2_photo_net_lock(); // busy: another fetch runs, skip this refresh
@@ -190,4 +192,4 @@ if (v2_photo_claim($marker)) {
     v2_photo_release($marker, $image !== false);
 }
 v2_photo_net_unlock($lock);
-$image !== false ? v2_photo_redirect($image['image_url']) : v2_photo_not_found(true);
+$image !== false ? v2_photo_redirect($image['image_url'], $width) : v2_photo_not_found(true);

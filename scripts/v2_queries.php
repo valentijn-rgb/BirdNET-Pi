@@ -343,6 +343,7 @@ function v2_clip(array $row): array
 
 // Wikimedia only serves standard thumbnail widths (250, 330, 500, ...); 320 answers HTTP 400.
 const V2_THUMB_WIDTH = 330;
+const V2_FULL_WIDTH = 1280; // the tap-to-enlarge photo; an original narrower than this answers 400 too
 
 /** Wikimedia upload/thumb URL → $width px thumbnail URL. Other hosts are returned unchanged. */
 function v2_thumb_url(string $url, int $width = V2_THUMB_WIDTH): string

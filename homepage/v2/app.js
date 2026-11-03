@@ -10,7 +10,8 @@
       span.className = img.className + ' placeholder';
       span.setAttribute('aria-hidden', 'true');
       span.textContent = img.getAttribute('data-initial') || '';
-      img.replaceWith(span);
+      // No photo, nothing to enlarge: the placeholder replaces the zoom link too.
+      (img.closest('a[data-zoom]') || img).replaceWith(span);
     }
     document.addEventListener('error', function (e) {
       var img = e.target;
@@ -22,6 +23,35 @@
     for (var i = 0; i < imgs.length; i++) {
       if (imgs[i].complete && imgs[i].naturalWidth === 0) swap(imgs[i]);
     }
+  }
+
+  // a[data-zoom] (the species photo) opens its large photo full-screen in a <dialog>; a tap or Esc
+  // closes it. Without JS the link opens the large photo itself. Wikimedia refuses a thumbnail wider
+  // than the original, so a failed large photo falls back to the hero's own image.
+  function initZoom() {
+    var dlg = null, big = null;
+    document.addEventListener('click', function (e) {
+      var a = e.target.closest && e.target.closest('a[data-zoom]');
+      if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      if (typeof HTMLDialogElement !== 'function') return;
+      e.preventDefault();
+      if (!dlg) {
+        dlg = document.createElement('dialog');
+        dlg.className = 'zoom';
+        big = document.createElement('img');
+        big.addEventListener('error', function () {
+          if (big.dataset.fallback && big.src !== big.dataset.fallback) big.src = big.dataset.fallback;
+        });
+        dlg.appendChild(big);
+        dlg.addEventListener('click', function () { dlg.close(); });
+        document.body.appendChild(dlg);
+      }
+      var hero = a.querySelector('img');
+      big.alt = a.getAttribute('aria-label') || '';
+      big.dataset.fallback = hero ? hero.currentSrc : '';
+      big.src = a.href;
+      dlg.showModal();
+    });
   }
 
   // One shared <audio id="player">: a .play button toggles its clip; starting one resets any other.
@@ -99,6 +129,7 @@
 
   document.documentElement.classList.add('js');
   initPhotoFallback();
+  initZoom();
   initPlayer();
   initAutoSubmit();
   initBackLink();

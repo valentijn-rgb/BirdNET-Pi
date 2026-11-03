@@ -214,7 +214,7 @@ foreach ($shown as $r) {
     ?>
 <aside id="detail" class="detail" aria-labelledby="detail-name">
 <div class="hero-wrap">
-<?= v2_photo($sci, $nl, 200, true) ?>
+<a class="zoom" href="/v2/photo.php?sci=<?= urlencode($sci) ?>&amp;full=1" data-zoom aria-label="Foto van <?= h($nl) ?> vergroten"><?= v2_photo($sci, $nl, 200, true) ?></a>
 <a class="back" href="<?= h($back) ?>" data-back aria-label="Terug"><?= v2_icon(V2_BACK, 22, 2) ?></a>
 </div>
 <div class="detail-body">
