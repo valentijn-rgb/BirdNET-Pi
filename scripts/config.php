@@ -447,6 +447,8 @@ https://discordapp.com/api/webhooks/{WebhookID}/{WebhookToken}
       <dd>Scientific Name</dd>
       <dt>$comname</dt>
       <dd>Common Name</dd>
+      <dt>$nlname</dt>
+      <dd>Dutch Name (falls back to the Common Name)</dd>
       <dt>$confidence</dt>
       <dd>Confidence Score</dd>
       <dt>$confidencepct</dt>
@@ -475,6 +477,8 @@ https://discordapp.com/api/webhooks/{WebhookID}/{WebhookToken}
       <dd>An image of the detected species from a photo source, see below.</dd>
       <dt>$reason</dt>
       <dd>The reason a notification was sent</dd>
+      <dt>$nlreason</dt>
+      <dd>The reason in Dutch (eg. "eerste keer vandaag")</dd>
       </dl>
       <p>Use the variables defined above to customize your notification title and body.</p>
       <label for="apprise_notification_title">Notification Title: </label>

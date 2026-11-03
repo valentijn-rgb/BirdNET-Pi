@@ -188,6 +188,28 @@ class TestAppriseNotifications(unittest.TestCase):
         sendAppriseNotifications(**self.get_default_params())
         self.assertEqual(mock_notify.call_count, 1)
 
+    @patch('scripts.utils.helpers._load_settings')
+    @patch('scripts.utils.notifications.notify')
+    def test_notifications_dutch(self, mock_notify, mock_load_settings):
+        self.create_test_db()
+        self.create_apprise_config()
+        with open(self.apprise_body_file, 'w') as f:
+            f.write('$nlname ($comname), $nlreason')
+        settings_dict = Settings.with_defaults()
+        settings_dict["APPRISE_NOTIFY_NEW_SPECIES_EACH_DAY"] = "1"
+        settings_dict["APPRISE_NOTIFY_NEW_SPECIES"] = "1"
+        settings_dict["APPRISE_NOTIFICATION_TITLE"] = "$nlname"
+        mock_load_settings.return_value = settings_dict
+        sendAppriseNotifications(**self.get_default_params())
+
+        self.assertEqual(mock_notify.call_count, 2)
+        self.assertEqual(mock_notify.call_args_list[0][0][0], "Grote Kuiftiran (Great Crested Flycatcher), eerste keer vandaag")
+        self.assertEqual(mock_notify.call_args_list[0][0][1], "Grote Kuiftiran")
+        self.assertEqual(mock_notify.call_args_list[1][0][0], "Grote Kuiftiran (Great Crested Flycatcher), pas 1x gezien in 7 dagen")
+
+    def test_dutch_name_falls_back_to_common_name(self):
+        self.assertEqual(notifications.get_dutch_name("Nonexistus birdus", "Made-up Bird"), "Made-up Bird")
+
 
 if __name__ == '__main__':
     unittest.main()
