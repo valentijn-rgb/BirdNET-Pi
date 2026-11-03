@@ -86,6 +86,9 @@ main:has(> .tools) { gap: 12px; }
 }
 .tabbar a { min-height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: var(--f13); text-decoration: none; color: var(--muted); }
 .tabbar a[aria-current=page] { color: var(--accent); font-weight: var(--semi); }
+/* Focus (Tab key, tapping a field), scrollIntoView and #anchors scroll their target to the viewport edge,
+   which is behind the sticky bar; this keeps it clear (bar = 48px links + 12px padding + 1px border). */
+@media (max-width: 899.98px) { html { scroll-padding-bottom: calc(72px + env(safe-area-inset-bottom)); } }
 @media (min-width: 900px) {
   .tabbar { display: none; }
   .topnav { display: block; }
