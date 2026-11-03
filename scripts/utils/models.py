@@ -1,4 +1,3 @@
-import json
 import logging
 import math
 import operator
@@ -49,7 +48,7 @@ def get_meta_model(model=None, version=None):
     if version is None:
         version = conf.getint('DATA_MODEL_VERSION')
 
-    if model not in ['BirdNET_GLOBAL_6K_V2.4_Model_FP16', 'BirdNET-Go_classifier_20250916']:
+    if model not in ['BirdNET_GLOBAL_6K_V2.4_Model_FP16', 'BirdNET-Go_classifier_20250916', BirdNetV3.model_name]:
         return None
 
     if version == 1:
@@ -216,6 +215,10 @@ class BirdNetV3(Basemodel):
         # two outputs (scores, embeddings): take the one with a score per label
         self._output_layer_idx = [o['index'] for o in self.interpreter.get_output_details()
                                   if o['shape'][-1] == len(self.labels)][0]
+        # range filter: V2.4's eBird-based model. The V3 geomodel works at country scale and let Black
+        # Woodpecker and Tawny Owl through in central Rotterdam. V3's labels carry V2.4 names, so they match.
+        self._mdata_model = get_meta_model(self.model_name)
+        self._mdata_labels = get_model_labels(BirdNetV2_4.model_name)
 
     def predict(self, chunk):
         self.interpreter.set_tensor(self._input_layer_idx, np.array(chunk, dtype='float32')[np.newaxis, :])
@@ -223,13 +226,10 @@ class BirdNetV3(Basemodel):
         return self.label(self.interpreter.get_tensor(self._output_layer_idx)[0])
 
     def set_meta_data(self, lat, lon, week):
-        # the V3 geomodel's TFLite needs Flex ops, so its weekly lists are precomputed on the Mac
-        # (scripts/v3_make_species_list.py) for the Pi's fixed location
-        self._week = week48(week)
+        self._mdata_model.set_meta_data(lat, lon, week48(week))
 
     def get_species_list(self):
-        with open(os.path.join(MODEL_PATH, 'v3_species_by_week.json')) as f:
-            return json.load(f)['weeks'][str(self._week)]
+        return self._mdata_model.get_species_list(self._mdata_labels)
 
 
 def week48(iso_week):

@@ -1,4 +1,3 @@
-import json
 import os
 import tempfile
 import unittest
@@ -67,21 +66,33 @@ class TestBirdNetV3(unittest.TestCase):
         mock_load_settings.return_value = v3_settings()
         with patch.object(models.tflite, 'Interpreter', wraps=models.tflite.Interpreter) as interpreter:
             get_model()
-        self.assertEqual(interpreter.call_args.kwargs.get('experimental_op_resolver_type'),
+        v3_call = [c for c in interpreter.call_args_list if V3 in c.args[0]][0]  # not the range model's
+        self.assertEqual(v3_call.kwargs.get('experimental_op_resolver_type'),
                          models.tflite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
                          if hasattr(models.tflite, 'experimental') else models.tflite.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES)
 
     @patch('scripts.utils.helpers._load_settings')
-    def test_species_list_for_week(self, mock_load_settings):
-        mock_load_settings.return_value = v3_settings()
+    def test_species_list_comes_from_v24_range_model(self, mock_load_settings):
+        # the V3 geomodel lets Black Woodpecker and Tawny Owl through in central Rotterdam; V2.4's does not
+        mock_load_settings.return_value = v3_settings(SF_THRESH=0.03)
         model = get_model()
-        with tempfile.TemporaryDirectory() as model_path:
-            with open(os.path.join(model_path, 'v3_species_by_week.json'), 'w') as f:
-                json.dump({'latitude': 51.917, 'longitude': 4.455, 'threshold': 0.03,
-                           'weeks': {'41': ['Pica pica'], '42': ['Strix aluco']}}, f)
-            with patch('scripts.utils.models.MODEL_PATH', model_path):
-                model.set_meta_data(51.9, 4.5, 44)
-                self.assertEqual(model.get_species_list(), ['Pica pica'])
+        model.set_meta_data(51.917, 4.455, 45)  # ISO week 45 = BirdNET week 42
+        species = model.get_species_list()
+        self.assertIn('Pica pica', species)
+        self.assertIn('Psittacula krameri', species)
+        for out_of_area in ['Dryocopus martius', 'Strix aluco', 'Acridotheres tristis', 'Aix sponsa']:
+            self.assertNotIn(out_of_area, species)
+
+    @patch('scripts.utils.helpers._load_settings')
+    def test_species_list_follows_sf_thresh(self, mock_load_settings):
+        mock_load_settings.return_value = v3_settings(SF_THRESH=0.03)
+        strict = get_model()
+        strict.set_meta_data(51.917, 4.455, 45)
+        mock_load_settings.return_value = v3_settings(SF_THRESH=0.01)
+        loose = get_model()
+        loose.set_meta_data(51.917, 4.455, 45)
+        self.assertIn('Strix aluco', loose.get_species_list())
+        self.assertLess(len(strict.get_species_list()), len(loose.get_species_list()))
 
 
 class TestMissingModelFile(unittest.TestCase):
